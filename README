@@ -1,0 +1,54 @@
+CL-LIBSVM
+
+Common Lisp wrapper for the libsvm support vector machine library by
+Ravenpack, Gabor Melis.
+
+It's under the MIT licence. See COPYING.
+
+* Design notes
+
+The lisp API tries to protect the programmer for the dangers of C,
+take of memory management and wrap everything in CLOS classes while
+trying not to deviate too much from the original interface so that one
+can use existing documentation without too much trouble.
+
+* API differences
+
+PROBLEMs, PARAMETERs and MODELs are represented as CLOS classes.
+Foreign memory is freed when they are garbage collected. The
+implementation is based on weak value hash tables (currently for sbcl,
+allegro and clisp).
+
+In the C API, one passes sparse vectors as struct node *, where a node
+with index -1 denotes the end of the vector. On the lisp side one
+passes sparse vectors as vectors of index/value conses like (VECTOR
+(CONS 2 0.1) (CONS 3 0.2)) or as mapper functions. The restrictions
+that indices should be increasing and not less than 1 still stand, but
+unlike in C, violations are detected.
+
+A mapper for an sparse vector calls the function it is given with
+index and value parameters. A mapper function that simply maps a
+vector of conses is:
+
+  (lambda (fn)
+    (map nil (lambda (c)
+               (funcall fn (car c) (cdr c)))
+         (vector (cons 2 0.1) (cons 3 0.2))))
+
+Mappers abstracts away the underlying data structure. Generalized
+sequences would be nicer, but they only exist in SBCL.
+
+One can pass a mapper function instead of a vector anywhere including
+the TARGETS parameter of TRAIN. It also works for the INPUTS parameter
+since INPUTS is a vector of sparse vectors one can turn it into a
+mapper to sparse vector mappers.
+
+* Compatibility
+
+Tested with libsvm version 2.82 and 2.83.
+
+In the lib/ directory there are platform specific shared libraries.
+
+Note that you may want to disable excessive verbosity by changing '#if
+1' to '#if 0' around the definition of info in svm.cpp. The linux so
+files contain this change.
