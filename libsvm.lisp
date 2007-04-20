@@ -176,7 +176,7 @@ non-zero of C.")
   ((index :initarg :index :reader index)
    (max-index :initarg :max-index :reader max-index))
   (:report (lambda (condition stream)
-             (format stream "Invalid sparse index ~S is less than ~S"
+             (format stream "Invalid sparse index ~S is not greater than ~S"
                      (index condition) (max-index condition)))))
 
 (defmethod translate-to-foreign ((vector vector) (name (eql 'sparse-vector)))
@@ -547,6 +547,13 @@ INPUT according to MODEL.")
       (map nil function sequence-or-mapper)
       (funcall sequence-or-mapper function)))
 
+(defun map-input (function sequence-or-mapper)
+  (if (typep sequence-or-mapper 'sequence)
+      (map nil (lambda (feature)
+                 (funcall function (car feature) (cdr feature)))
+           sequence-or-mapper)
+      (funcall sequence-or-mapper function)))
+
 (defclass normalizer ()
   ((lower :initarg :lower :reader lower)
    (upper :initarg :upper :reader upper)
@@ -558,19 +565,18 @@ as svm-scale."))
   "Create a normalizer that will translate inputs to the [LOWER,UPPER]
 range."
   (let ((min-maxes (make-array 0 :adjustable t)))
-    (labels ((one-feature (feature)
-               (destructuring-bind (index . value) feature
-                 (unless (< index (length min-maxes))
-                   (adjust-array min-maxes (1+ index) :initial-element nil))
-                 (if (null (aref min-maxes index))
-                     (setf (aref min-maxes index) (cons value value))
-                     (destructuring-bind (min . max) (aref min-maxes index)
-                       (when (or (null min) (< value min))
-                         (setf (car (aref min-maxes index)) value))
-                       (when (or (null max) (< max value))
-                         (setf (cdr (aref min-maxes index)) value))))))
+    (labels ((one-feature (index value)
+               (unless (< index (length min-maxes))
+                 (adjust-array min-maxes (1+ index) :initial-element nil))
+               (if (null (aref min-maxes index))
+                   (setf (aref min-maxes index) (cons value value))
+                   (destructuring-bind (min . max) (aref min-maxes index)
+                     (when (or (null min) (< value min))
+                       (setf (car (aref min-maxes index)) value))
+                     (when (or (null max) (< max value))
+                       (setf (cdr (aref min-maxes index)) value)))))
              (one-input (input)
-               (map-it #'one-feature input)))
+               (map-input #'one-feature input)))
       (map-it #'one-input inputs))
     (make-instance 'normalizer :lower lower :upper upper
                    :min-maxes min-maxes)))
@@ -588,15 +594,13 @@ range."
                     (* (/ (- upper lower)
                           (- max min))
                        (- value min))))))
-      (map-it (lambda (feature)
-                (destructuring-bind (index . value) feature
-                  (destructuring-bind (min . max)
-                      (if (< 0 index (length min-maxes))
-                          (aref min-maxes index)
-                          (cons nil nil))
-                    (funcall function
-                             (cons index (norm value min max))))))
-              input))))
+      (map-input (lambda (index value)
+                   (destructuring-bind (min . max)
+                       (if (< 0 index (length min-maxes))
+                           (aref min-maxes index)
+                           (cons nil nil))
+                     (funcall function index (norm value min max))))
+                 input))))
 
 (defun save-normalizer (normalizer filename)
   "Save NORMALIZER to FILENAME in the format used by svm-scale."
@@ -677,11 +681,10 @@ range."
                        (vector (cons 1 1.0) (cons 4 6.0))))
          (normalizer (make-normalizer data)))
     (map-normalized-input normalizer (aref data 0)
-                          (lambda (feature)
-                            (destructuring-bind (index . value) feature
-                              (assert (= value (ecase index
-                                                 ((1) 1)
-                                                 ((3) -1)))))))
+                          (lambda (index value)
+                            (assert (= value (ecase index
+                                               ((1) 1)
+                                               ((3) -1))))))
     (save-normalizer normalizer "/tmp/nnn")
     (let ((normalizer2 (load-normalizer "/tmp/nnn")))
       (assert (= (lower normalizer) (lower normalizer2)))

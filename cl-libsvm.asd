@@ -3,7 +3,7 @@
 (cl:defpackage #:cl-libsvm.system
   (:use #:cl #:asdf))
 
-(in-package #:cl-libsvm.system)
+(cl:in-package #:cl-libsvm.system)
 
 (defsystem #:cl-libsvm
   :name "CL-LIBSVM"

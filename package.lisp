@@ -9,6 +9,8 @@
            #:problem-size
            #:problem-target
            #:map-problem-input
+           #:save-problem
+           #:load-problem
            ;; Parameter
            #:parameter
            #:svm-type
