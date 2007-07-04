@@ -19,6 +19,7 @@
            #:check-parameter
            #:parameter-error
            ;; Model
+           #:model
            #:save-model
            #:load-model
            #:train
