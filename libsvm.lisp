@@ -261,7 +261,7 @@ class for classification or value for regression."))
 
 (defun make-problem (targets inputs)
   "Create a problem from TARGET that is a vector of real numbers and
-INPUT that is a vector of sparse vectors. A sparse vector has
+INPUTS that is a vector of sparse vectors. A sparse vector has
 index/value conses as elements, alternatively it may be given as a
 mapper function that maps to index and value."
   (multiple-value-bind (targets n-targets)

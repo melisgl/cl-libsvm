@@ -26,16 +26,16 @@ passes sparse vectors as vectors of index/value conses like (VECTOR
 that indices should be increasing and not less than 1 still stand, but
 unlike in C, violations are detected.
 
-A mapper for an sparse vector calls the function it is given with
-index and value parameters. A mapper function that simply maps a
-vector of conses is:
+A mapper for a sparse vector calls the function it is given with index
+and value parameters. A mapper function that simply maps a vector of
+conses is:
 
   (lambda (fn)
     (map nil (lambda (c)
                (funcall fn (car c) (cdr c)))
          (vector (cons 2 0.1) (cons 3 0.2))))
 
-Mappers abstracts away the underlying data structure. Generalized
+Mappers abstract away the underlying data structure. Generalized
 sequences would be nicer, but they only exist in SBCL.
 
 One can pass a mapper function instead of a vector anywhere including
