@@ -496,14 +496,17 @@ used later to make predictions."))
 
 (defun save-model (model filename)
   "Save MODEL to FILENAME."
-  (%save-model (namestring filename) model))
+  (%save-model (namestring
+                (merge-pathnames filename *default-pathname-defaults*))
+               model))
 
 (defcfun ("svm_load_model" %load-model) model
   (filename :string))
 
 (defun load-model (filename)
   "Load a model from a file."
-  (let ((model (%load-model (namestring filename))))
+  (let* ((filename (merge-pathnames filename *default-pathname-defaults*))
+         (model (%load-model (namestring filename))))
     (when (null-pointer-p (pointer model))
       (error "Cannot load ~S" filename))
     model))
