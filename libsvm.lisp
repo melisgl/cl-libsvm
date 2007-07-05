@@ -75,7 +75,8 @@ instantiated when a pointer of CTYPE is being wrapped."))
 (defgeneric destroy-wrapped-pointer (pointer ctype)
   (:method (pointer ctype)
     (declare (ignore ctype))
-    (foreign-free pointer))
+    (unless (null-pointer-p pointer)
+      (foreign-free pointer)))
   (:documentation "Free foreign resources associated with POINTER of CTYPE."))
 
 (defmethod initialize-instance :after ((wrapper wrapper) &key &allow-other-keys)
@@ -495,13 +496,17 @@ used later to make predictions."))
 
 (defun save-model (model filename)
   "Save MODEL to FILENAME."
-  (%save-model filename model))
+  (%save-model (namestring filename) model))
 
-(defcfun ("svm_load_model" load-model) model
+(defcfun ("svm_load_model" %load-model) model
   (filename :string))
 
-(setf (documentation #'load-model 'function)
-      "Load a model from a file.")
+(defun load-model (filename)
+  "Load a model from a file."
+  (let ((model (%load-model (namestring filename))))
+    (when (null-pointer-p (pointer model))
+      (error "Cannot load ~S" filename))
+    model))
 
 (defcfun ("svm_train" %train) model
   (problem problem)
