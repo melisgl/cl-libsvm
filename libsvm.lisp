@@ -16,18 +16,17 @@
                   *libsvm-lib-dir*))
 
 #-(and :linux :x86)
-(progn
+(define-foreign-library libsvm
+  (:unix (:or "libsvm.so.2" "libsvm.so"))
+  (:windows (:or "libsvm.dll" "svmc.dll"))
+  (t (:default "libsvm")))
 
-  (define-foreign-library libsvm
-    (:unix (:or "libsvm.so.2" "libsvm.so"))
-    (:windows (:or "libsvm.dll" "svmc.dll"))
-    (t (:default "libsvm")))
-
-  (use-foreign-library libsvm))
+#-(and :linux :x86)
+(use-foreign-library libsvm)
 
 (define-condition libsvm-error () ())
 
-;;; Wrapped pointers
+;;;; Wrapped pointers
 
 (defvar *wrappers*
   #+sbcl
@@ -39,26 +38,23 @@
   "An address to wrapper map.")
 
 (defclass wrapper ()
-  ((pointer :initarg :pointer :reader pointer
-            :documentation "A foreign pointer that is destroyed when
-its wrapper is garbage collected.")
-   (ctype :initarg :ctype :reader ctype
-          :documentation "The foreign type of POINTER.")
-   (references :initarg :references :reader references
-               :documentation "A list of pointer/ctype conses of
-foreign objects reachable from POINTER.")
-   (extra-references :initform '() :accessor extra-references
-                     :documentation "A list of pointer/ctype conses
-reachable from POINTER. As opposed to REFERENCES this may be set. Use
-this to to store references to foreign objects whose parts are
-used reachable from this pointer.")))
+  ((pointer
+    :initarg :pointer :reader pointer
+    :documentation "A foreign pointer that is destroyed when its
+wrapper is garbage collected.")
+   (ctype
+    :initarg :ctype :reader ctype
+    :documentation "The foreign type of POINTER.")
+   (references
+    :initarg :references :accessor references
+    :documentation "A list of lisp objects reachable from POINTER.")))
 
-(defgeneric reachable-pointers (pointer ctype)
+(defgeneric reachable-objects (pointer ctype)
   (:method (pointer ctype)
     (declare (ignore pointer ctype))
     '())
-  (:documentation "Return a list of conses of pointer and ctype
-representing the pointers reachable from POINTER of CTYPE."))
+  (:documentation "Return a list of objects reachable from POINTER of
+CTYPE. Used to initialize REFERNCES of a wrapper."))
 
 (defgeneric ctype->wrapper-class (ctype)
   (:method (ctype)
@@ -74,10 +70,7 @@ instantiated when a pointer of CTYPE is being wrapped."))
         (setf (gethash (pointer-address pointer) *wrappers*)
               (make-instance (ctype->wrapper-class ctype)
                              :pointer pointer :ctype ctype
-                             :references
-                             (mapcar (lambda (pointer ctype)
-                                       (wrap pointer ctype))
-                                     (reachable-pointers pointer ctype)))))))
+                             :references (reachable-objects pointer ctype))))))
 
 (defgeneric destroy-wrapped-pointer (pointer ctype)
   (:method (pointer ctype)
@@ -102,7 +95,7 @@ instantiated when a pointer of CTYPE is being wrapped."))
      (defmethod translate-to-foreign ((wrapper ,class) (name (eql ',ctype)))
        (pointer wrapper))))
 
-;;; Utilities
+;;;; Utilities
 
 (defun foreign-slot-value* (object pointer-ctype ctype slot-name)
   "A type safe variant of FOREIGN-SLOT-VALUE that first convert the
@@ -230,8 +223,8 @@ non-zero of C.")
                                    param)
   (declare (ignore param))
   (foreign-free value))
-
-;;; Problem
+
+;;;; Problem
 
 (defcstruct problem-struct
   (l :int)
@@ -354,7 +347,7 @@ PROBLEM."
                                        (map-input fn line)))))))
         (make-problem #'map-targets #'map-inputs)))))
 
-;;; Parameter
+;;;; Parameter
 
 (defcenum svm-type :c-svc :nu-svc :one-class :epsilon-svr :nu-svr)
 
@@ -472,9 +465,8 @@ fails signal BAD-PARAMETER condition."
             (parameter-error problem parameter r)
             (values nil r))
         t)))
-
 
-;;; Model
+;;;; Model
 
 (defctype model :pointer)
 
@@ -528,8 +520,7 @@ Signal a PARAMETER-ERROR if PARAMETER is incorrect."
   (let ((model (%train problem parameter)))
     ;; The models created by svm_train keep references into the
     ;; problem so it must be kept around.
-    (setf (extra-references model)
-          (list (cons (pointer problem) 'problem)))
+    (push problem (references model))
     model))
 
 (defcfun ("svm_predict" predict) :double
