@@ -1,0 +1,6 @@
+The file libsvm.dll was compiled on Windows 2000 and I'd expect it to
+work on XP but it fails to load. For this reason libsvm-xp.dll is also
+provided that was compiled on XP. Unfortunately I see no way to
+distuinguish between Windows 2000 and XP easily so it's up to the user
+to arrange for the right file to get loaded for instance by copying
+libsvm-xp.dll it over libsvm.dll.
