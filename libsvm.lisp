@@ -10,7 +10,7 @@
                                   :name "libsvm" :type "so")
                    *libsvm-dir*))
 
-#+(and :linux :x86)
+#+(and :linux cffi-features:x86)
 (load-foreign-library
  (merge-pathnames (make-pathname :directory '(:relative "linux-x86"))
                   *libsvm-lib-dir*))
@@ -21,7 +21,15 @@
                                  :directory '(:relative "win-x86"))
                   *libsvm-lib-dir*))
 
-#-(and (or :linux cffi-features:windows) :x86)
+#+(and cffi-features:windows cffi-features:x86-64)
+(load-foreign-library
+ (merge-pathnames (make-pathname :name "libsvm" :type "dll"
+                                 :directory '(:relative "win-x86-64"))
+                  *libsvm-lib-dir*))
+
+#-(or (and :linux cffi-features:x86)
+      (and cffi-features:windows cffi-features:x86)
+      (and cffi-features:windows cffi-features:x86-64))
 (define-foreign-library libsvm
   (:unix (:or "libsvm.so.2" "libsvm.so"))
   (:windows (:or "libsvm.dll" "svmc.dll"))
