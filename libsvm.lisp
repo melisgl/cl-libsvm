@@ -23,6 +23,7 @@
 
 #-(and (or :linux cffi-features:windows) :x86)
 (define-foreign-library libsvm
+  (:darwin "libsvm.dylib")
   (:unix (:or "libsvm.so.2" "libsvm.so"))
   (:windows (:or "libsvm.dll" "svmc.dll"))
   (t (:default "libsvm")))
@@ -85,7 +86,8 @@ instantiated when a pointer of CTYPE is being wrapped."))
       (foreign-free pointer)))
   (:documentation "Free foreign resources associated with POINTER of CTYPE."))
 
-(defmethod initialize-instance :after ((wrapper wrapper) &key &allow-other-keys)
+(defmethod initialize-instance :after ((wrapper wrapper)
+                                       &key &allow-other-keys)
   (let ((pointer (pointer wrapper))
         (ctype (ctype wrapper)))
     (finalize wrapper
@@ -669,7 +671,7 @@ range."
                              (coerce (aref inputs i) 'list)
                              (coerce (input->vector problem i) 'list))))))
     (assert (not (check-parameter problem (make-parameter :degree -1))))
-    (let ((parameter (make-parameter :gamma 8 )))
+    (let ((parameter (make-parameter :gamma 8)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
                (loop for i below (length inputs) do
