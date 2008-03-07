@@ -10,7 +10,7 @@
   :description "CFFI wrapper for LIBSVM"
   :long-description "CFFI wrapper for LIBSVM, the machine learning library"
   :author "Gabor Melis"
-  :version "0.0.3"
+  :version "0.0.5"
   :licence "MIT"
   :components ((:file "package")
                (:file "libsvm"))
