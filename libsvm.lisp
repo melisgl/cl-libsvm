@@ -186,7 +186,9 @@ non-zero of C.")
   ((index :initarg :index :reader index)
    (max-index :initarg :max-index :reader max-index))
   (:report (lambda (condition stream)
-             (format stream "Invalid sparse index ~S is not greater than ~S"
+             (format stream "Invalid sparse index ~S is not greater than ~S. ~
+                             Indices must be in ascending order ~
+                             and greater than zero."
                      (index condition) (max-index condition)))))
 
 (defmethod translate-to-foreign ((vector vector) (name (eql 'sparse-vector)))
@@ -303,6 +305,10 @@ mapper function that maps to index and value."
         while (<= 0 index) do
         (funcall function index value)))
 
+;;; Note that this is the only way to get back the input vectors from
+;;; PROBLEM because pointers to the sparse vectors that make up the
+;;; problem are not wrapped (see wrapper mechanism) and consequently
+;;; they cannot be handed out to client code.
 (defun map-problem-input (function problem i)
   "Map FUNCTION over the indices and values of the Ith input vector of
 PROBLEM."
@@ -437,6 +443,12 @@ particular kernel."))
                        (degree 3) (gamma 0) (coef0 0) (nu 0.5)
                        (cache-size-MiB 100) (c 1) (eps 0.001) (p 0.1)
                        (shrinking t) probability)
+  "Make an object that describes how to TRAIN. Note that the command
+line svm-train defaults to GAMMA=1/maxindex but in this function it
+defaults to 0. SVM-TYPE is one of :C-SVC, :NU-SVC, :ONE-CLASS,
+:EPSILON-SVR, :NU-SVR. KERNEL-TYPE is one of :LINEAR, :POLY, :RBF,
+:SIGMOID, :PRECOMPUTED. See the LIBSVM documentation for the meaning
+of the arguments."
   (let* ((parameter (foreign-alloc 'parameter-struct)))
     (macrolet ((set-slots (&rest names)
                  (list* 'progn
