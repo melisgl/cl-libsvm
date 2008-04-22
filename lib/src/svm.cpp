@@ -35,7 +35,7 @@ inline double powi(double base, int times)
 #define TAU 1e-12
 #define Malloc(type,n) (type *)malloc((n)*sizeof(type))
 #if 0
-void info(char *fmt,...)
+void info(const char *fmt,...)
 {
 	va_list ap;
 	va_start(ap,fmt);
@@ -60,7 +60,7 @@ void info_flush() {}
 class Cache
 {
 public:
-	Cache(int l,int size);
+	Cache(int l,long int size);
 	~Cache();
 
 	// request data [0,len)
@@ -70,7 +70,7 @@ public:
 	void swap_index(int i, int j);	// future_option
 private:
 	int l;
-	int size;
+	long int size;
 	struct head_t
 	{
 		head_t *prev, *next;	// a cicular list
@@ -84,12 +84,12 @@ private:
 	void lru_insert(head_t *h);
 };
 
-Cache::Cache(int l_,int size_):l(l_),size(size_)
+Cache::Cache(int l_,long int size_):l(l_),size(size_)
 {
 	head = (head_t *)calloc(l,sizeof(head_t));	// initialized to 0
 	size /= sizeof(Qfloat);
 	size -= l * sizeof(head_t) / sizeof(Qfloat);
-	size = max(size, 2*l);	// cache must be large enough for two columns
+	size = max(size, 2 * (long int) l);	// cache must be large enough for two columns
 	lru_head.next = lru_head.prev = &lru_head;
 }
 
@@ -361,14 +361,14 @@ double Kernel::k_function(const svm_node *x, const svm_node *y,
 		case PRECOMPUTED:  //x: test (validation), y: SV
 			return x[(int)(y->value)].value;
 		default:
-			return 0;	/* Unreachable */
+			return 0;  // Unreachable 
 	}
 }
 
-// Generalized SMO+SVMlight algorithm
+// An SMO algorithm in Fan et al., JMLR 6(2005), p. 1889--1918
 // Solves:
 //
-//	min 0.5(\alpha^T Q \alpha) + b^T \alpha
+//	min 0.5(\alpha^T Q \alpha) + p^T \alpha
 //
 //		y^T \alpha = \delta
 //		y_i = +1 or -1
@@ -377,9 +377,9 @@ double Kernel::k_function(const svm_node *x, const svm_node *y,
 //
 // Given:
 //
-//	Q, b, y, Cp, Cn, and an initial feasible point \alpha
+//	Q, p, y, Cp, Cn, and an initial feasible point \alpha
 //	l is the size of vectors and matrices
-//	eps is the stopping criterion
+//	eps is the stopping tolerance
 //
 // solution will be put in \alpha, objective value will be put in obj
 //
@@ -396,7 +396,7 @@ public:
 		double r;	// for Solver_NU
 	};
 
-	void Solve(int l, const QMatrix& Q, const double *b_, const schar *y_,
+	void Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		   double *alpha_, double Cp, double Cn, double eps,
 		   SolutionInfo* si, int shrinking);
 protected:
@@ -410,7 +410,7 @@ protected:
 	const Qfloat *QD;
 	double eps;
 	double Cp,Cn;
-	double *b;
+	double *p;
 	int *active_set;
 	double *G_bar;		// gradient, if we treat free variables as 0
 	int l;
@@ -434,9 +434,10 @@ protected:
 	void swap_index(int i, int j);
 	void reconstruct_gradient();
 	virtual int select_working_set(int &i, int &j);
-	virtual int max_violating_pair(int &i, int &j);
 	virtual double calculate_rho();
 	virtual void do_shrinking();
+private:
+	bool be_shrunken(int i, double Gmax1, double Gmax2);	
 };
 
 void Solver::swap_index(int i, int j)
@@ -446,7 +447,7 @@ void Solver::swap_index(int i, int j)
 	swap(G[i],G[j]);
 	swap(alpha_status[i],alpha_status[j]);
 	swap(alpha[i],alpha[j]);
-	swap(b[i],b[j]);
+	swap(p[i],p[j]);
 	swap(active_set[i],active_set[j]);
 	swap(G_bar[i],G_bar[j]);
 }
@@ -459,7 +460,7 @@ void Solver::reconstruct_gradient()
 
 	int i;
 	for(i=active_size;i<l;i++)
-		G[i] = G_bar[i] + b[i];
+		G[i] = G_bar[i] + p[i];
 	
 	for(i=0;i<active_size;i++)
 		if(is_free(i))
@@ -471,14 +472,14 @@ void Solver::reconstruct_gradient()
 		}
 }
 
-void Solver::Solve(int l, const QMatrix& Q, const double *b_, const schar *y_,
+void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 		   double *alpha_, double Cp, double Cn, double eps,
 		   SolutionInfo* si, int shrinking)
 {
 	this->l = l;
 	this->Q = &Q;
 	QD=Q.get_QD();
-	clone(b, b_,l);
+	clone(p, p_,l);
 	clone(y, y_,l);
 	clone(alpha,alpha_,l);
 	this->Cp = Cp;
@@ -508,7 +509,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *b_, const schar *y_,
 		int i;
 		for(i=0;i<l;i++)
 		{
-			G[i] = b[i];
+			G[i] = p[i];
 			G_bar[i] = 0;
 		}
 		for(i=0;i<l;i++)
@@ -706,7 +707,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *b_, const schar *y_,
 		double v = 0;
 		int i;
 		for(i=0;i<l;i++)
-			v += alpha[i] * (G[i] + b[i]);
+			v += alpha[i] * (G[i] + p[i]);
 
 		si->obj = v/2;
 	}
@@ -730,7 +731,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *b_, const schar *y_,
 
 	info("\noptimization finished, #iter = %d\n",iter);
 
-	delete[] b;
+	delete[] p;
 	delete[] y;
 	delete[] alpha;
 	delete[] alpha_status;
@@ -839,132 +840,101 @@ int Solver::select_working_set(int &out_i, int &out_j)
 	return 0;
 }
 
-// return 1 if already optimal, return 0 otherwise
-int Solver::max_violating_pair(int &out_i, int &out_j)
+bool Solver::be_shrunken(int i, double Gmax1, double Gmax2)
 {
-	// return i,j: maximal violating pair
-
-	double Gmax1 = -INF;		// max { -y_i * grad(f)_i | i in I_up(\alpha) }
-	int Gmax1_idx = -1;
-
-	double Gmax2 = -INF;		// max { y_i * grad(f)_i | i in I_low(\alpha) }
-	int Gmax2_idx = -1;
-
-	for(int i=0;i<active_size;i++)
+	if(is_upper_bound(i))
 	{
-		if(y[i]==+1)	// y = +1
-		{
-			if(!is_upper_bound(i))	// d = +1
-			{
-				if(-G[i] >= Gmax1)
-				{
-					Gmax1 = -G[i];
-					Gmax1_idx = i;
-				}
-			}
-			if(!is_lower_bound(i))	// d = -1
-			{
-				if(G[i] >= Gmax2)
-				{
-					Gmax2 = G[i];
-					Gmax2_idx = i;
-				}
-			}
-		}
-		else		// y = -1
-		{
-			if(!is_upper_bound(i))	// d = +1
-			{
-				if(-G[i] >= Gmax2)
-				{
-					Gmax2 = -G[i];
-					Gmax2_idx = i;
-				}
-			}
-			if(!is_lower_bound(i))	// d = -1
-			{
-				if(G[i] >= Gmax1)
-				{
-					Gmax1 = G[i];
-					Gmax1_idx = i;
-				}
-			}
-		}
+		if(y[i]==+1)
+			return(-G[i] > Gmax1);
+		else
+			return(-G[i] > Gmax2);
 	}
-
-	if(Gmax1+Gmax2 < eps)
- 		return 1;
-
-	out_i = Gmax1_idx;
-	out_j = Gmax2_idx;
-	return 0;
+	else if(is_lower_bound(i))
+	{
+		if(y[i]==+1)
+			return(G[i] > Gmax2);
+		else	
+			return(G[i] > Gmax1);
+	}
+	else
+		return(false);
 }
 
 void Solver::do_shrinking()
 {
-	int i,j,k;
-	if(max_violating_pair(i,j)!=0) return;
-	double Gm1 = -y[j]*G[j];
-	double Gm2 = y[i]*G[i];
+	int i;
+	double Gmax1 = -INF;		// max { -y_i * grad(f)_i | i in I_up(\alpha) }
+	double Gmax2 = -INF;		// max { y_i * grad(f)_i | i in I_low(\alpha) }
+
+	// find maximal violating pair first
+	for(i=0;i<active_size;i++)
+	{
+		if(y[i]==+1)	
+		{
+			if(!is_upper_bound(i))	
+			{
+				if(-G[i] >= Gmax1)
+					Gmax1 = -G[i];
+			}
+			if(!is_lower_bound(i))	
+			{
+				if(G[i] >= Gmax2)
+					Gmax2 = G[i];
+			}
+		}
+		else	
+		{
+			if(!is_upper_bound(i))	
+			{
+				if(-G[i] >= Gmax2)
+					Gmax2 = -G[i];
+			}
+			if(!is_lower_bound(i))	
+			{
+				if(G[i] >= Gmax1)
+					Gmax1 = G[i];
+			}
+		}
+	}
 
 	// shrink
-	
-	for(k=0;k<active_size;k++)
-	{
-		if(is_lower_bound(k))
-		{
-			if(y[k]==+1)
-			{
-				if(-G[k] >= Gm1) continue;
-			}
-			else	if(-G[k] >= Gm2) continue;
-		}
-		else if(is_upper_bound(k))
-		{
-			if(y[k]==+1)
-			{
-				if(G[k] >= Gm2) continue;
-			}
-			else	if(G[k] >= Gm1) continue;
-		}
-		else continue;
 
-		--active_size;
-		swap_index(k,active_size);
-		--k;	// look at the newcomer
-	}
+	for(i=0;i<active_size;i++)
+		if (be_shrunken(i, Gmax1, Gmax2))
+		{
+			active_size--;
+			while (active_size > i)
+			{
+				if (!be_shrunken(active_size, Gmax1, Gmax2))
+				{
+					swap_index(i,active_size);
+					break;
+				}
+				active_size--;
+			}
+		}
 
 	// unshrink, check all variables again before final iterations
 
-	if(unshrinked || -(Gm1 + Gm2) > eps*10) return;
+	if(unshrinked || Gmax1 + Gmax2 > eps*10) return;
 	
 	unshrinked = true;
 	reconstruct_gradient();
 
-	for(k=l-1;k>=active_size;k--)
-	{
-		if(is_lower_bound(k))
+	for(i=l-1;i>=active_size;i--)
+		if (!be_shrunken(i, Gmax1, Gmax2))
 		{
-			if(y[k]==+1)
+			while (active_size < i)
 			{
-				if(-G[k] < Gm1) continue;
+				if (be_shrunken(active_size, Gmax1, Gmax2))
+				{
+					swap_index(i,active_size);
+					break;
+				}
+				active_size++;
 			}
-			else	if(-G[k] < Gm2) continue;
+			active_size++;
 		}
-		else if(is_upper_bound(k))
-		{
-			if(y[k]==+1)
-			{
-				if(G[k] < Gm2) continue;
-			}
-			else	if(G[k] < Gm1) continue;
-		}
-		else continue;
-
-		swap_index(k,active_size);
-		active_size++;
-		++k;	// look at the newcomer
-	}
 }
 
 double Solver::calculate_rho()
@@ -976,16 +946,16 @@ double Solver::calculate_rho()
 	{
 		double yG = y[i]*G[i];
 
-		if(is_lower_bound(i))
+		if(is_upper_bound(i))
 		{
-			if(y[i] > 0)
+			if(y[i]==-1)
 				ub = min(ub,yG);
 			else
 				lb = max(lb,yG);
 		}
-		else if(is_upper_bound(i))
+		else if(is_lower_bound(i))
 		{
-			if(y[i] < 0)
+			if(y[i]==+1)
 				ub = min(ub,yG);
 			else
 				lb = max(lb,yG);
@@ -1014,17 +984,18 @@ class Solver_NU : public Solver
 {
 public:
 	Solver_NU() {}
-	void Solve(int l, const QMatrix& Q, const double *b, const schar *y,
+	void Solve(int l, const QMatrix& Q, const double *p, const schar *y,
 		   double *alpha, double Cp, double Cn, double eps,
 		   SolutionInfo* si, int shrinking)
 	{
 		this->si = si;
-		Solver::Solve(l,Q,b,y,alpha,Cp,Cn,eps,si,shrinking);
+		Solver::Solve(l,Q,p,y,alpha,Cp,Cn,eps,si,shrinking);
 	}
 private:
 	SolutionInfo *si;
 	int select_working_set(int &i, int &j);
 	double calculate_rho();
+	bool be_shrunken(int i, double Gmax1, double Gmax2, double Gmax3, double Gmax4);
 	void do_shrinking();
 };
 
@@ -1141,6 +1112,26 @@ int Solver_NU::select_working_set(int &out_i, int &out_j)
 	return 0;
 }
 
+bool Solver_NU::be_shrunken(int i, double Gmax1, double Gmax2, double Gmax3, double Gmax4)
+{
+	if(is_upper_bound(i))
+	{
+		if(y[i]==+1)
+			return(-G[i] > Gmax1);
+		else	
+			return(-G[i] > Gmax4);
+	}
+	else if(is_lower_bound(i))
+	{
+		if(y[i]==+1)
+			return(G[i] > Gmax2);
+		else	
+			return(G[i] > Gmax3);
+	}
+	else
+		return(false);
+}
+
 void Solver_NU::do_shrinking()
 {
 	double Gmax1 = -INF;	// max { -y_i * grad(f)_i | y_i = +1, i in I_up(\alpha) }
@@ -1149,90 +1140,65 @@ void Solver_NU::do_shrinking()
 	double Gmax4 = -INF;	// max { y_i * grad(f)_i | y_i = -1, i in I_low(\alpha) }
 
 	// find maximal violating pair first
-	int k;
-	for(k=0;k<active_size;k++)
+	int i;
+	for(i=0;i<active_size;i++)
 	{
-		if(!is_upper_bound(k))
+		if(!is_upper_bound(i))
 		{
-			if(y[k]==+1)
+			if(y[i]==+1)
 			{
-				if(-G[k] > Gmax1) Gmax1 = -G[k];
+				if(-G[i] > Gmax1) Gmax1 = -G[i];
 			}
-			else	if(-G[k] > Gmax3) Gmax3 = -G[k];
+			else	if(-G[i] > Gmax4) Gmax4 = -G[i];
 		}
-		if(!is_lower_bound(k))
+		if(!is_lower_bound(i))
 		{
-			if(y[k]==+1)
+			if(y[i]==+1)
 			{	
-				if(G[k] > Gmax2) Gmax2 = G[k];
+				if(G[i] > Gmax2) Gmax2 = G[i];
 			}
-			else	if(G[k] > Gmax4) Gmax4 = G[k];
+			else	if(G[i] > Gmax3) Gmax3 = G[i];
 		}
 	}
 
 	// shrinking
 
-	double Gm1 = -Gmax2;
-	double Gm2 = -Gmax1;
-	double Gm3 = -Gmax4;
-	double Gm4 = -Gmax3;
-
-	for(k=0;k<active_size;k++)
-	{
-		if(is_lower_bound(k))
+	for(i=0;i<active_size;i++)
+		if (be_shrunken(i, Gmax1, Gmax2, Gmax3, Gmax4))
 		{
-			if(y[k]==+1)
+			active_size--;
+			while (active_size > i)
 			{
-				if(-G[k] >= Gm1) continue;
+				if (!be_shrunken(active_size, Gmax1, Gmax2, Gmax3, Gmax4))
+				{
+					swap_index(i,active_size);
+					break;
+				}
+				active_size--;
 			}
-			else	if(-G[k] >= Gm3) continue;
 		}
-		else if(is_upper_bound(k))
-		{
-			if(y[k]==+1)
-			{
-				if(G[k] >= Gm2) continue;
-			}
-			else	if(G[k] >= Gm4) continue;
-		}
-		else continue;
-
-		--active_size;
-		swap_index(k,active_size);
-		--k;	// look at the newcomer
-	}
 
 	// unshrink, check all variables again before final iterations
 
-	if(unshrinked || max(-(Gm1+Gm2),-(Gm3+Gm4)) > eps*10) return;
+	if(unshrinked || max(Gmax1+Gmax2,Gmax3+Gmax4) > eps*10) return;
 	
 	unshrinked = true;
 	reconstruct_gradient();
 
-	for(k=l-1;k>=active_size;k--)
-	{
-		if(is_lower_bound(k))
+	for(i=l-1;i>=active_size;i--)
+		if (!be_shrunken(i, Gmax1, Gmax2, Gmax3, Gmax4))
 		{
-			if(y[k]==+1)
+			while (active_size < i)
 			{
-				if(-G[k] < Gm1) continue;
+				if (be_shrunken(active_size, Gmax1, Gmax2, Gmax3, Gmax4))
+				{
+					swap_index(i,active_size);
+					break;
+				}
+				active_size++;
 			}
-			else	if(-G[k] < Gm3) continue;
+			active_size++;
 		}
-		else if(is_upper_bound(k))
-		{
-			if(y[k]==+1)
-			{
-				if(G[k] < Gm2) continue;
-			}
-			else	if(G[k] < Gm4) continue;
-		}
-		else continue;
-
-		swap_index(k,active_size);
-		active_size++;
-		++k;	// look at the newcomer
-	}
 }
 
 double Solver_NU::calculate_rho()
@@ -1246,10 +1212,10 @@ double Solver_NU::calculate_rho()
 	{
 		if(y[i]==+1)
 		{
-			if(is_lower_bound(i))
-				ub1 = min(ub1,G[i]);
-			else if(is_upper_bound(i))
+			if(is_upper_bound(i))
 				lb1 = max(lb1,G[i]);
+			else if(is_lower_bound(i))
+				ub1 = min(ub1,G[i]);
 			else
 			{
 				++nr_free1;
@@ -1258,10 +1224,10 @@ double Solver_NU::calculate_rho()
 		}
 		else
 		{
-			if(is_lower_bound(i))
-				ub2 = min(ub2,G[i]);
-			else if(is_upper_bound(i))
+			if(is_upper_bound(i))
 				lb2 = max(lb2,G[i]);
+			else if(is_lower_bound(i))
+				ub2 = min(ub2,G[i]);
 			else
 			{
 				++nr_free2;
@@ -1295,7 +1261,7 @@ public:
 	:Kernel(prob.l, prob.x, param)
 	{
 		clone(y,y_,prob.l);
-		cache = new Cache(prob.l,(int)(param.cache_size*(1<<20)));
+		cache = new Cache(prob.l,(long int)(param.cache_size*(1<<20)));
 		QD = new Qfloat[prob.l];
 		for(int i=0;i<prob.l;i++)
 			QD[i]= (Qfloat)(this->*kernel_function)(i,i);
@@ -1344,7 +1310,7 @@ public:
 	ONE_CLASS_Q(const svm_problem& prob, const svm_parameter& param)
 	:Kernel(prob.l, prob.x, param)
 	{
-		cache = new Cache(prob.l,(int)(param.cache_size*(1<<20)));
+		cache = new Cache(prob.l,(long int)(param.cache_size*(1<<20)));
 		QD = new Qfloat[prob.l];
 		for(int i=0;i<prob.l;i++)
 			QD[i]= (Qfloat)(this->*kernel_function)(i,i);
@@ -1391,7 +1357,7 @@ public:
 	:Kernel(prob.l, prob.x, param)
 	{
 		l = prob.l;
-		cache = new Cache(l,(int)(param.cache_size*(1<<20)));
+		cache = new Cache(l,(long int)(param.cache_size*(1<<20)));
 		QD = new Qfloat[2*l];
 		sign = new schar[2*l];
 		index = new int[2*l];
@@ -1735,16 +1701,16 @@ struct svm_model
 	int nr_class;		// number of classes, = 2 in regression/one class svm
 	int l;			// total #SV
 	svm_node **SV;		// SVs (SV[l])
-	double **sv_coef;	// coefficients for SVs in decision functions (sv_coef[n-1][l])
-	double *rho;		// constants in decision functions (rho[n*(n-1)/2])
+	double **sv_coef;	// coefficients for SVs in decision functions (sv_coef[k-1][l])
+	double *rho;		// constants in decision functions (rho[k*(k-1)/2])
 	double *probA;          // pariwise probability information
 	double *probB;
 
 	// for classification only
 
-	int *label;		// label of each class (label[n])
-	int *nSV;		// number of SVs for each class (nSV[n])
-				// nSV[0] + nSV[1] + ... + nSV[n-1] = l
+	int *label;		// label of each class (label[k])
+	int *nSV;		// number of SVs for each class (nSV[k])
+				// nSV[0] + nSV[1] + ... + nSV[k-1] = l
 	// XXX
 	int free_sv;		// 1 if svm_model is created by svm_load_model
 				// 0 if svm_model is created by svm_train
@@ -1764,7 +1730,7 @@ void sigmoid_train(
 	
 	int max_iter=100; 	// Maximal number of iterations
 	double min_step=1e-10;	// Minimal step taken in line search
-	double sigma=1e-3;	// For numerically strict PD of Hessian
+	double sigma=1e-12;	// For numerically strict PD of Hessian
 	double eps=1e-5;
 	double hiTarget=(prior1+1.0)/(prior1+2.0);
 	double loTarget=1/(prior0+2.0);
@@ -2738,7 +2704,7 @@ int svm_save_model(const char *model_file_name, const svm_model *model)
 
 svm_model *svm_load_model(const char *model_file_name)
 {
-	FILE *fp = fopen(model_file_name,"rb");
+	FILE *fp = fopen(model_file_name,"r");
 	if(fp==NULL) return NULL;
 	
 	// read parameters

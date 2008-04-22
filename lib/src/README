@@ -1,1 +1,2 @@
-Slightly modified sources of from libsvm-2.83.
+Sources from libsvm-2.86 with info() silenced and
+__declspec(dllexport) magic in svm.h for windows.
