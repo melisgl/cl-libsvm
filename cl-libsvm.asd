@@ -15,7 +15,7 @@
   :components ((:file "package")
                (:file "libsvm"))
   :serial t
-  :depends-on (cffi))
+  :depends-on (cffi trivial-garbage))
 
 (defmethod perform ((o test-op) (c (eql (find-system 'cl-libsvm))))
   (funcall (intern (symbol-name '#:test)

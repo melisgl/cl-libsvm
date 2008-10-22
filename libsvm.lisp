@@ -40,16 +40,12 @@
 (use-foreign-library libsvm)
 
 (define-condition libsvm-error () ())
+
 
 ;;;; Wrapped pointers
 
 (defvar *wrappers*
-  #+sbcl
-  (make-hash-table :weakness :value)
-  #+allegro
-  (make-hash-table :values :weak)
-  #+clisp
-  (make-hash-table :weak :value)
+  (tg:make-weak-hash-table :weakness :value)
   "An address to wrapper map.")
 
 (defclass wrapper ()
@@ -98,18 +94,18 @@ instantiated when a pointer of CTYPE is being wrapped."))
                                        &key &allow-other-keys)
   (let ((pointer (pointer wrapper))
         (ctype (ctype wrapper)))
-    (finalize wrapper
-              (lambda ()
-                (remhash (pointer-address pointer) *wrappers*)
-                (destroy-wrapped-pointer pointer ctype)))))
+    (tg:finalize wrapper
+                 (lambda ()
+                   (remhash (pointer-address pointer) *wrappers*)
+                   (destroy-wrapped-pointer pointer ctype)))))
 
-(defmacro define-wrapped-pointer (ctype &key (class ctype))
+(defmacro define-wrapped-pointer (ctype class)
   `(progn
-     (defmethod ctype->wrapper-class ((ctype (eql ',ctype)))
+     (defmethod ctype->wrapper-class ((ctype ,ctype))
        ',class)
-     (defmethod translate-from-foreign (pointer (name (eql ',ctype)))
-       (wrap pointer ',ctype))
-     (defmethod translate-to-foreign ((wrapper ,class) (name (eql ',ctype)))
+     (defmethod translate-from-foreign (pointer (ctype ,ctype))
+       (wrap pointer ctype))
+     (defmethod translate-to-foreign ((wrapper ,class) (ctype ,ctype))
        (pointer wrapper))))
 
 ;;;; Utilities
@@ -120,32 +116,33 @@ lisp OBJECT to POINTER-CTYPE and than returns the value of its slot."
   (foreign-slot-value (convert-to-foreign object pointer-ctype)
                       ctype slot-name))
 
-(defctype boolean :int
-  :documentation "Convert between lisp generalized booleans and zero
-non-zero of C.")
+(defun convert-to-double (x)
+  (coerce x 'double-float))
 
-(defmethod translate-from-foreign (value (name (eql 'boolean)))
-  (not (zerop value)))
-
-(defmethod translate-to-foreign (value (name (eql 'boolean)))
-  (if value 1 0))
-
-(defctype auto-double :double)
-
-(defmethod translate-to-foreign (value (name (eql 'auto-double)))
-  (coerce value 'double-float))
+(defctype auto-double (:wrapper :double :to-c convert-to-double))
 
 (defcstruct node
   (index :int)
   (value auto-double))
 
-(defctype double-vector :pointer)
+(define-foreign-type double-vector ()
+  ()
+  (:actual-type :pointer)
+  (:simple-parser double-vector))
 
-(defctype sparse-vector :pointer)
+(define-foreign-type sparse-vector ()
+  ()
+  (:actual-type :pointer)
+  (:simple-parser sparse-vector))
 
-(defctype temporary-sparse-vector sparse-vector)
+(define-foreign-type temporary-sparse-vector (sparse-vector)
+  ()
+  (:simple-parser temporary-sparse-vector))
 
-(defctype sparse-vector-vector :pointer)
+(define-foreign-type sparse-vector-vector ()
+  ()
+  (:actual-type :pointer)
+  (:simple-parser sparse-vector-vector))
 
 (defun mapper-length (mapper)
   (let ((n 0))
@@ -173,13 +170,13 @@ non-zero of C.")
   (:method ((symbol symbol) ctype)
     (convert-vector (symbol-function symbol) ctype)))
 
-(defmethod translate-to-foreign ((v vector) (name (eql 'double-vector)))
+(defmethod translate-to-foreign ((v vector) (name double-vector))
   (convert-vector v 'auto-double))
 
-(defmethod translate-to-foreign ((v function) (name (eql 'double-vector)))
+(defmethod translate-to-foreign ((v function) (name double-vector))
   (convert-vector v 'auto-double))
 
-(defmethod translate-to-foreign ((v symbol) (name (eql 'double-vector)))
+(defmethod translate-to-foreign ((v symbol) (name double-vector))
   (convert-vector v 'auto-double))
 
 (define-condition sparse-index-error (libsvm-error)
@@ -191,7 +188,7 @@ non-zero of C.")
                              and greater than zero."
                      (index condition) (max-index condition)))))
 
-(defmethod translate-to-foreign ((vector vector) (name (eql 'sparse-vector)))
+(defmethod translate-to-foreign ((vector vector) (name sparse-vector))
   (let* ((n (length vector))
          (v (foreign-alloc 'node :count (1+ n)))
          (max-index 0))
@@ -206,7 +203,7 @@ non-zero of C.")
     (setf (foreign-slot-value (mem-aref v 'node n) 'node 'value) 0.0d0)
     v))
 
-(defmethod translate-to-foreign ((mapper function) (name (eql 'sparse-vector)))
+(defmethod translate-to-foreign ((mapper function) (name sparse-vector))
   (let* ((n (mapper-length mapper))
          (v (foreign-alloc 'node :count (1+ n)))
          (i 0)
@@ -225,24 +222,23 @@ non-zero of C.")
     (setf (foreign-slot-value (mem-aref v 'node n) 'node 'value) 0.0d0)
     v))
 
-(defmethod translate-to-foreign ((symbol symbol) (name (eql 'sparse-vector)))
+(defmethod translate-to-foreign ((symbol symbol) (name sparse-vector))
   (translate-to-foreign symbol name))
 
-(defmethod translate-to-foreign ((v vector) (name (eql 'sparse-vector-vector)))
+(defmethod translate-to-foreign ((v vector) (name sparse-vector-vector))
   (convert-vector v 'sparse-vector))
 
-(defmethod translate-to-foreign ((v function)
-                                 (name (eql 'sparse-vector-vector)))
+(defmethod translate-to-foreign ((v function) (name sparse-vector-vector))
   (convert-vector v 'sparse-vector))
 
-(defmethod translate-to-foreign ((v symbol) (name (eql 'sparse-vector-vector)))
+(defmethod translate-to-foreign ((v symbol) (name sparse-vector-vector))
   (convert-vector v 'sparse-vector))
 
-(defmethod free-translated-object (value (name (eql 'temporary-sparse-vector))
-                                   param)
+(defmethod free-translated-object (value (name temporary-sparse-vector) param)
   (declare (ignore param))
   (foreign-free value))
 
+
 ;;;; Problem
 
 (defcstruct problem-struct
@@ -250,21 +246,24 @@ non-zero of C.")
   (y double-vector)
   (x sparse-vector-vector))
 
-(defctype problem :pointer)
-
-(defclass problem (wrapper) ()
+(define-foreign-type problem-type ()
+  ()
+  (:actual-type :pointer)
+  (:simple-parser problem)
   (:documentation "A problem consists of a number of sparse input
 vectors and their respective targets. The target is the label of the
 class for classification or value for regression."))
+
+(defclass problem (wrapper) ())
+
+(define-wrapped-pointer problem-type problem)
 
 (defmethod print-object ((problem problem) stream)
   (print-unreadable-object (problem stream :type t :identity t)
     (format stream ":SIZE ~A" (problem-size problem)))
   problem)
 
-(define-wrapped-pointer problem)
-
-(defmethod destroy-wrapped-pointer (problem (ctype (eql 'problem)))
+(defmethod destroy-wrapped-pointer (problem (ctype problem-type))
   (foreign-free (foreign-slot-value problem 'problem-struct 'y))
   (let ((x (foreign-slot-value problem 'problem-struct 'x)))
     (dotimes (i (foreign-slot-value problem 'problem-struct 'l))
@@ -285,7 +284,7 @@ mapper function that maps to index and value."
         (setf (foreign-slot-value p 'problem-struct 'l) n-targets
               (foreign-slot-value p 'problem-struct 'y) targets
               (foreign-slot-value p 'problem-struct 'x) inputs)
-        (wrap p 'problem)))))
+        (wrap p (make-instance 'problem-type))))))
 
 (defun problem-size (problem)
   "Return the number of targets in PROBLEM."
@@ -402,13 +401,14 @@ PROBLEM."
   ;; for EPSILON-SVR
   (p auto-double)
   ;; use the shrinking heuristics
-  (shrinking boolean)
+  (shrinking :boolean)
   ;; do probability estimates
-  (probability boolean))
+  (probability :boolean))
 
-(defctype parameter :pointer)
-
-(defclass parameter (wrapper) ()
+(define-foreign-type parameter-type ()
+  ()
+  (:actual-type :pointer)
+  (:simple-parser parameter)
   (:documentation "A parameter object encapsulates the different kinds
 of parameters of SVM. Some of the parameters are specific to a
 particular kernel."))
@@ -432,12 +432,14 @@ particular kernel."))
 
 ;;; FIXME: missing readers for parameters
 
+(defclass parameter (wrapper) ())
+
+(define-wrapped-pointer parameter-type parameter)
+
 (defmethod print-object ((parameter parameter) stream)
   (print-unreadable-object (parameter stream :type t :identity t)
     (format stream "~A/~A" (svm-type parameter) (kernel-type parameter)))
   parameter)
-
-(define-wrapped-pointer parameter)
 
 (defun make-parameter (&key (svm-type :c-svc) (kernel-type :rbf)
                        (degree 3) (gamma 0) (coef0 0) (nu 0.5)
@@ -449,7 +451,7 @@ defaults to 0. SVM-TYPE is one of :C-SVC, :NU-SVC, :ONE-CLASS,
 :EPSILON-SVR, :NU-SVR. KERNEL-TYPE is one of :LINEAR, :POLY, :RBF,
 :SIGMOID, :PRECOMPUTED. See the LIBSVM documentation for the meaning
 of the arguments."
-  (let* ((parameter (foreign-alloc 'parameter-struct)))
+  (let ((parameter (foreign-alloc 'parameter-struct)))
     (macrolet ((set-slots (&rest names)
                  (list* 'progn
                         (loop for name in names collect
@@ -465,7 +467,7 @@ of the arguments."
         (set-slots svm-type kernel-type degree gamma coef0 nu
                    cache-size-MiB c eps p shrinking probability
                    nr-weight weight-label weight))
-      (wrap parameter 'parameter))))
+      (wrap parameter (make-instance 'parameter-type)))))
 
 (defcfun ("svm_check_parameter" %check-parameter) :string
   (problem problem)
@@ -497,23 +499,29 @@ fails signal BAD-PARAMETER condition."
 
 ;;;; Model
 
-(defctype model :pointer)
-
-(defclass model (wrapper) ()
+(define-foreign-type model-type ()
+  ()
+  (:actual-type :pointer)
+  (:simple-parser model)
   (:documentation "A model is what falls out of training and can be
 used later to make predictions."))
 
-(define-wrapped-pointer model)
+(defclass model (wrapper) ())
+
+(define-wrapped-pointer model-type model)
 
 (defcfun ("svm_destroy_model" %destroy-model) :void
   (model model))
 
-(defmethod destroy-wrapped-pointer (model (ctype (eql 'model)))
+(defmethod destroy-wrapped-pointer (model (ctype model))
   (%destroy-model model))
 
-(defctype error-code :int)
+(define-foreign-type error-code-type ()
+  ()
+  (:actual-type :int)
+  (:simple-parser error-code))
 
-(defmethod translate-from-foreign (error-code (name (eql 'error-code)))
+(defmethod translate-from-foreign (error-code (name error-code-type))
   (unless (zerop error-code)
     (error "Error code: ~S" error-code))
   (values))
@@ -727,5 +735,6 @@ range."
 #|
 
 (test)
+(loop repeat 10000 do (test))
 
 |#
