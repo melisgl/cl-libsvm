@@ -637,39 +637,50 @@ range."
                      (funcall function index (norm value min max))))
                  input))))
 
+(defun write-normalizer (normalizer stream)
+  "Save NORMALIZER to STREAM in the format used by svm-scale."
+  (let ((*print-pretty* nil)
+        (min-maxes (min-maxes normalizer)))
+    (format stream "x~%~S ~S~%" (lower normalizer) (upper normalizer))
+    (loop for i below (length min-maxes) do
+          (when (aref min-maxes i)
+            (destructuring-bind (min . max) (aref min-maxes i)
+              (format stream "~D ~S ~S~%"
+                      i (float min 0.0) (float max 0.0)))))))
+
 (defun save-normalizer (normalizer filename)
   "Save NORMALIZER to FILENAME in the format used by svm-scale."
-  (with-open-file (s filename :direction :output :if-does-not-exist :create
+  (with-open-file (stream filename
+                   :direction :output :if-does-not-exist :create
                    :if-exists :supersede :element-type 'base-char
                    :external-format :ascii)
-    (let ((*print-pretty* nil)
-          (min-maxes (min-maxes normalizer)))
-      (format s "x~%~S ~S~%" (lower normalizer) (upper normalizer))
-      (loop for i below (length min-maxes) do
-            (when (aref min-maxes i)
-              (destructuring-bind (min . max) (aref min-maxes i)
-                (format s "~D ~S ~S~%" i (float min 0.0) (float max 0.0))))))))
+    (write-normalizer normalizer stream)))
+
+(defun read-normalizer (stream)
+  "Load normalizer from STREAM that is in the format used by svm-scale."
+  (unless (string= "x" (read-line stream))
+    (error "File format not supported."))
+  (let ((lower (read stream))
+        (upper (read stream))
+        (min-maxes (make-array 0 :adjustable t)))
+    (loop for line = (read-line stream nil nil)
+          while line
+          do
+          (with-input-from-string (stream line)
+            (let ((index (read stream))
+                  (min (read stream))
+                  (max (read stream)))
+              (unless (< index (length min-maxes))
+                (adjust-array min-maxes (1+ index) :initial-element nil))
+              (setf (aref min-maxes index) (cons min max)))))
+    (make-instance 'normalizer :lower lower :upper upper
+                   :min-maxes min-maxes)))
 
 (defun load-normalizer (filename)
   "Load normalizer from FILENAME that is in the format used by svm-scale."
-  (with-open-file (s filename :element-type 'base-char :external-format :ascii)
-    (unless (string= "x" (read-line s))
-      (error "File format not supported."))
-    (let ((lower (read s))
-          (upper (read s))
-          (min-maxes (make-array 0 :adjustable t)))
-      (loop for line = (read-line s nil nil)
-            while line
-            do
-            (with-input-from-string (s line)
-              (let ((index (read s))
-                    (min (read s))
-                    (max (read s)))
-                (unless (< index (length min-maxes))
-                  (adjust-array min-maxes (1+ index) :initial-element nil))
-                (setf (aref min-maxes index) (cons min max)))))
-      (make-instance 'normalizer :lower lower :upper upper
-                     :min-maxes min-maxes))))
+  (with-open-file (stream filename
+                   :element-type 'base-char :external-format :ascii)
+    (read-normalizer stream)))
 
 (defun test-problem ()
   (let* ((targets (vector 0 1 1 0))
@@ -705,10 +716,12 @@ range."
                (loop for i below (length inputs) do
                      (assert (= (aref targets i)
                                 (predict model (aref inputs i)))))))
-        (let ((model (train problem parameter)))
+        (let ((model (train problem parameter))
+              (filename (merge-pathnames (make-pathname :name "test-model")
+                                         *libsvm-dir*)))
           (test-model model)
-          (save-model model "/tmp/cl-libsvm-test-model"))
-        (test-model (load-model "/tmp/cl-libsvm-test-model"))))))
+          (save-model model filename)
+          (test-model (load-model filename)))))))
 
 (defun test-normalizer ()
   (let* ((data (vector (vector (cons 1 4.0) (cons 3 -5.0))
@@ -720,12 +733,14 @@ range."
                             (assert (= value (ecase index
                                                ((1) 1)
                                                ((3) -1))))))
-    (save-normalizer normalizer "/tmp/nnn")
-    (let ((normalizer2 (load-normalizer "/tmp/nnn")))
-      (assert (= (lower normalizer) (lower normalizer2)))
-      (assert (= (upper normalizer) (upper normalizer2)))
-      (assert (string= (prin1-to-string (min-maxes normalizer))
-                       (prin1-to-string (min-maxes normalizer2)))))))
+    (let ((string (with-output-to-string (s)
+                    (write-normalizer normalizer s))))
+      (with-input-from-string (s string)
+        (let ((normalizer2 (read-normalizer s)))
+          (assert (= (lower normalizer) (lower normalizer2)))
+          (assert (= (upper normalizer) (upper normalizer2)))
+          (assert (string= (prin1-to-string (min-maxes normalizer))
+                           (prin1-to-string (min-maxes normalizer2)))))))))
 
 
 (defun test ()
@@ -735,6 +750,5 @@ range."
 #|
 
 (test)
-(loop repeat 10000 do (test))
 
 |#
