@@ -30,14 +30,13 @@
 #-(or (and :linux cffi-features:x86)
       (and cffi-features:windows cffi-features:x86)
       (and cffi-features:windows cffi-features:x86-64))
-(define-foreign-library libsvm
-  (:darwin "libsvm.dylib")
-  (:unix (:or "libsvm.so.2" "libsvm.so"))
-  (:windows (:or "libsvm.dll" "svmc.dll"))
-  (t (:default "libsvm")))
-
-#-(and (or :linux cffi-features:windows) :x86)
-(use-foreign-library libsvm)
+(progn
+  (define-foreign-library libsvm
+    (:darwin "libsvm.dylib")
+    (:unix (:or "libsvm.so.2" "libsvm.so"))
+    (:windows (:or "libsvm.dll" "svmc.dll"))
+    (t (:default "libsvm")))
+  (use-foreign-library libsvm))
 
 (define-condition libsvm-error () ())
 
