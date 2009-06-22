@@ -606,6 +606,26 @@ using the model. For one-class model, label[0] is +1 or -1."
         (setf (aref decision-values i) (mem-aref v :double i)))
       decision-values)))
 
+;;; This is not in stock libsvm, the sources distributed with
+;;; cl-libsvm have it.
+(defcfun ("svm_get_model_w2" %svm_get_model_w2) :pointer
+  (model model))
+
+(defun model-w2s (model)
+  "Get the squared norm of the vector of each hyperplane for the
+binary SVMs. See PREDICT-VALUES. To calculate the distance from the
+decision boundary:
+
+  (/ (abs (aref decision-values i))
+     (sqrt (aref w2s i)))"
+  (let* ((n-classes (n-classes model))
+         (n (/ (* n-classes (1- n-classes)) 2))
+         (v (%svm_get_model_w2 model)))
+    (let ((w2s (make-array n :element-type 'double-float)))
+      (dotimes (i n)
+        (setf (aref w2s i) (mem-aref v :double i)))
+      w2s)))
+
 ;;; FIXME: cross validation, probability stuff is missing
 
 (defun map-it (function sequence-or-mapper)
@@ -715,6 +735,7 @@ range."
 
 (defun test-problem ()
   (let* ((targets (vector 0 1 1 0))
+         ;; inputs: ((0 0) (0 1) (1 0) (1 1)) (plus sparse indices)
          (inputs (vector (vector (cons 1 0) (cons 2 0))
                          ;; Pass a mapper function
                          (lambda (fn)
@@ -744,10 +765,71 @@ range."
     (let ((parameter (make-parameter :gamma 8)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
+               (assert (= 2 (or (n-classes model))))))
+        (let ((model (train problem parameter))
+              (filename (merge-pathnames (make-pathname :name "test-model")
+                                         *libsvm-dir*)))
+          (test-model model)
+          (save-model model filename)
+          (test-model (load-model filename)))))))
+
+(defun ~= (x y &optional (tolerance 0.01))
+  (< (abs (- x y)) tolerance))
+
+(defun test-predict-values ()
+  (let* ((inputs (coerce (loop repeat 100
+                               collect (let ((x (random 1d0))
+                                             (y (random 1d0)))
+                                         (vector (cons 1 x) (cons 2 y))))
+                         'vector))
+         (targets (map 'vector
+                       (lambda (input)
+                         (if (< 0.5 (cdr (aref input 0)))
+                             1
+                             -1))
+                       inputs))
+         (problem (make-problem targets inputs)))
+    (assert (= (length targets) (problem-size problem)))
+    (let ((parameter (make-parameter :kernel-type :linear)))
+      (assert (check-parameter problem parameter))
+      (flet ((test-model (model)
                (assert (= 2 (or (n-classes model))))
-               (loop for i below (length inputs) do
-                     (assert (= (aref targets i)
-                                (predict model (aref inputs i)))))))
+               (let ((w2s (model-w2s model)))
+                 (format t "W2S: ~S~%" w2s)
+                 (loop for i below (length inputs) do
+                       (format t "~S: ~S~%" i (aref inputs i))
+                       (when (< 0.1 (abs (- 0.5 (cdr (aref (aref inputs i) 0)))))
+                         (assert (= (aref targets i)
+                                    (predict model (aref inputs i)))))
+                       (let ((decision-values
+                              (predict-values model (aref inputs i))))
+                         (format t "DV: ~S~%" decision-values)
+                         (print (map 'vector
+                                     (lambda (decision-value w2)
+                                       (/ (abs decision-value)
+                                          (sqrt w2)))
+                                     decision-values
+                                     w2s))
+                         (terpri)))
+                 (flet ((distance (x y)
+                          (aref (map 'vector
+                                     (lambda (decision-value w2)
+                                       (/ (abs decision-value)
+                                          (sqrt w2)))
+                                     (predict-values model
+                                                     (vector (cons 1 x)
+                                                             (cons 2 y)))
+                                     w2s)
+                                0)))
+                   (let ((a (distance 0.5 1))
+                         (b (distance 0.5 0))
+                         (c (distance 0.5 -1))
+                         (d (distance 0.3 1))
+                         (e (distance 0.7 0))
+                         (f (distance 0.1 1))
+                         (g (distance 0.9 0)))
+                     (assert (< (max a b c) (min d e)))
+                     (assert (< (max d e) (min f g))))))))
         (let ((model (train problem parameter))
               (filename (merge-pathnames (make-pathname :name "test-model")
                                          *libsvm-dir*)))
@@ -777,6 +859,7 @@ range."
 
 (defun test ()
   (test-problem)
+  (test-predict-values)
   (test-normalizer))
 
 #|

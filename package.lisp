@@ -26,6 +26,7 @@
            #:n-classes
            #:predict
            #:predict-values
+           #:model-w2s
            ;; Normalizer
            #:normalizer
            #:make-normalizer

@@ -391,6 +391,7 @@ public:
 	struct SolutionInfo {
 		double obj;
 		double rho;
+		double w_2;     // for hyperplane
 		double upper_bound_p;
 		double upper_bound_n;
 		double r;	// for Solver_NU
@@ -1448,6 +1449,9 @@ static void solve_c_svc(
 	for(i=0;i<l;i++)
 		alpha[i] *= y[i];
 
+	// here we set the |w|^2 property (for extracting the distance
+	// to the hyperplane)
+	si->w_2 = -2 * (fabs(si->obj) - sum_alpha);
 	delete[] minus_ones;
 	delete[] y;
 }
@@ -1622,6 +1626,7 @@ struct decision_function
 {
 	double *alpha;
 	double rho;	
+	double w_2;
 };
 
 decision_function svm_train_one(
@@ -1678,6 +1683,7 @@ decision_function svm_train_one(
 	decision_function f;
 	f.alpha = alpha;
 	f.rho = si.rho;
+	f.w_2 = si.w_2;
 	return f;
 }
 
@@ -1692,6 +1698,7 @@ struct svm_model
 	svm_node **SV;		// SVs (SV[l])
 	double **sv_coef;	// coefficients for SVs in decision functions (sv_coef[k-1][l])
 	double *rho;		// constants in decision functions (rho[k*(k-1)/2])
+        double *w_2;            // hyperplane squared norms for each binary SVM
 	double *probA;          // pariwise probability information
 	double *probB;
 
@@ -1704,6 +1711,12 @@ struct svm_model
 	int free_sv;		// 1 if svm_model is created by svm_load_model
 				// 0 if svm_model is created by svm_train
 };
+
+// nr_class*(nr_class-1)/2 values
+double *svm_get_model_w2(const struct svm_model *model)
+{
+    return model->w_2;
+}
 
 // Platt's binary SVM Probablistic Output: an improvement from Lin et al.
 void sigmoid_train(
@@ -2102,6 +2115,8 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		decision_function f = svm_train_one(prob,param,0,0);
 		model->rho = Malloc(double,1);
 		model->rho[0] = f.rho;
+		model->w_2 = Malloc(double,1);
+		model->w_2[0] = f.w_2;
 
 		int nSV = 0;
 		int i;
@@ -2215,8 +2230,12 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 			model->label[i] = label[i];
 		
 		model->rho = Malloc(double,nr_class*(nr_class-1)/2);
+		model->w_2 = Malloc(double,nr_class*(nr_class-1)/2);
 		for(i=0;i<nr_class*(nr_class-1)/2;i++)
+		{
 			model->rho[i] = f[i].rho;
+			model->w_2[i] = f[i].w_2;
+		}
 
 		if(param->probability)
 		{
@@ -2634,6 +2653,13 @@ int svm_save_model(const char *model_file_name, const svm_model *model)
 			fprintf(fp," %g",model->rho[i]);
 		fprintf(fp, "\n");
 	}
+
+	{
+		fprintf(fp, "w_2");
+		for(int i=0;i<nr_class*(nr_class-1)/2;i++)
+			fprintf(fp," %g",model->w_2[i]);
+		fprintf(fp, "\n");
+	}
 	
 	if(model->label)
 	{
@@ -2701,6 +2727,7 @@ svm_model *svm_load_model(const char *model_file_name)
 	svm_model *model = Malloc(svm_model,1);
 	svm_parameter& param = model->param;
 	model->rho = NULL;
+	model->w_2 = NULL;
 	model->probA = NULL;
 	model->probB = NULL;
 	model->label = NULL;
@@ -2727,6 +2754,7 @@ svm_model *svm_load_model(const char *model_file_name)
 			{
 				fprintf(stderr,"unknown svm type.\n");
 				free(model->rho);
+				free(model->w_2);
 				free(model->label);
 				free(model->nSV);
 				free(model);
@@ -2749,6 +2777,7 @@ svm_model *svm_load_model(const char *model_file_name)
 			{
 				fprintf(stderr,"unknown kernel function.\n");
 				free(model->rho);
+				free(model->w_2);
 				free(model->label);
 				free(model->nSV);
 				free(model);
@@ -2771,6 +2800,13 @@ svm_model *svm_load_model(const char *model_file_name)
 			model->rho = Malloc(double,n);
 			for(int i=0;i<n;i++)
 				fscanf(fp,"%lf",&model->rho[i]);
+		}
+		else if(strcmp(cmd,"w_2")==0)
+		{
+			int n = model->nr_class * (model->nr_class-1)/2;
+			model->w_2 = Malloc(double,n);
+			for(int i=0;i<n;i++)
+				fscanf(fp,"%lf",&model->w_2[i]);
 		}
 		else if(strcmp(cmd,"label")==0)
 		{
@@ -2813,6 +2849,7 @@ svm_model *svm_load_model(const char *model_file_name)
 		{
 			fprintf(stderr,"unknown text in model file: [%s]\n",cmd);
 			free(model->rho);
+			free(model->w_2);
 			free(model->label);
 			free(model->nSV);
 			free(model);
@@ -2889,6 +2926,7 @@ void svm_destroy_model(svm_model* model)
 	free(model->SV);
 	free(model->sv_coef);
 	free(model->rho);
+	free(model->w_2);
 	free(model->label);
 	free(model->probA);
 	free(model->probB);

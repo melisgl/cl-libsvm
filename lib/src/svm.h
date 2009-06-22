@@ -72,6 +72,8 @@ double svm_get_svr_probability(const struct svm_model *model);
 XPRT
 void svm_predict_values(const struct svm_model *model, const struct svm_node *x, double* dec_values);
 XPRT
+double *svm_get_model_w2(const struct svm_model *model);
+XPRT
 double svm_predict(const struct svm_model *model, const struct svm_node *x);
 XPRT
 double svm_predict_probability(const struct svm_model *model, const struct svm_node *x, double* prob_estimates);
