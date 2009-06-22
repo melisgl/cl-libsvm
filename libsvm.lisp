@@ -566,6 +566,13 @@ Signal a PARAMETER-ERROR if PARAMETER is incorrect."
     (push problem (references model))
     model))
 
+(defcfun ("svm_get_nr_class" n-classes) :int
+  (model model))
+
+(setf (documentation #'n-classes 'function)
+      "For a classification model, this function gives the number of
+classes. For a regression or an one-class model, 2 is returned.")
+
 (defcfun ("svm_predict" predict) :double
   (model model)
   (input temporary-sparse-vector))
@@ -574,7 +581,32 @@ Signal a PARAMETER-ERROR if PARAMETER is incorrect."
       "Return the prediction (a double float) for the sparse vector
 INPUT according to MODEL.")
 
-;;; FIXME: cross validation, predict-values, probability stuff is missing
+(defcfun ("svm_predict_values" %predict-values) :void
+  (model model)
+  (input temporary-sparse-vector)
+  (decision-values double-vector))
+
+(defun predict-values (model input)
+  "Wrapper around svm_predict_values. For a classification model with
+nr_class classes, this function gives nr_class*(nr_class-1)/2 decision
+values in the array dec_values, where nr_class can be obtained from
+the function svm_get_nr_class. The order is label[0] vs. label[1],
+..., label[0] vs. label[nr_class-1], label[1] vs. label[2], ...,
+label[nr_class-2] vs. label[nr_class-1], where label can be obtained
+from the function svm_get_labels.
+
+For a regression model, label[0] is the function value of x calculated
+using the model. For one-class model, label[0] is +1 or -1."
+  (let* ((n-classes (n-classes model))
+         (n (/ (* n-classes (1- n-classes)) 2))
+         (v (foreign-alloc :double :count n)))
+    (%predict-values model input v)
+    (let ((decision-values (make-array n :element-type 'double-float)))
+      (dotimes (i n)
+        (setf (aref decision-values i) (mem-aref v :double i)))
+      decision-values)))
+
+;;; FIXME: cross validation, probability stuff is missing
 
 (defun map-it (function sequence-or-mapper)
   (if (typep sequence-or-mapper 'sequence)
@@ -712,6 +744,7 @@ range."
     (let ((parameter (make-parameter :gamma 8)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
+               (assert (= 2 (or (n-classes model))))
                (loop for i below (length inputs) do
                      (assert (= (aref targets i)
                                 (predict model (aref inputs i)))))))

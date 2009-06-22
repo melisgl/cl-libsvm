@@ -23,7 +23,9 @@
            #:save-model
            #:load-model
            #:train
+           #:n-classes
            #:predict
+           #:predict-values
            ;; Normalizer
            #:normalizer
            #:make-normalizer
