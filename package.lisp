@@ -24,6 +24,7 @@
            #:load-model
            #:train
            #:n-classes
+           #:get-labels
            #:predict
            #:predict-values
            #:model-w2s

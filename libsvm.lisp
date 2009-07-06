@@ -573,6 +573,20 @@ Signal a PARAMETER-ERROR if PARAMETER is incorrect."
       "For a classification model, this function gives the number of
 classes. For a regression or an one-class model, 2 is returned.")
 
+(defcfun ("svm_get_labels" %get-labels) :void
+  (model model)
+  (labels :pointer))
+
+(defun get-labels (model)
+  "Wrapper around svm_get_labels."
+  (let* ((n-classes (n-classes model))
+         (v (foreign-alloc :int :count n-classes)))
+    (%get-labels model v)
+    (let ((labels (make-array n-classes :element-type 'integer)))
+      (dotimes (i n-classes)
+        (setf (aref labels i) (mem-aref v :int i)))
+      labels)))
+
 (defcfun ("svm_predict" predict) :double
   (model model)
   (input temporary-sparse-vector))
