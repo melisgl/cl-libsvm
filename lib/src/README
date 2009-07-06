@@ -1,2 +1,6 @@
-Sources from libsvm-2.88 with info() silenced and
-__declspec(dllexport) magic in svm.h for windows.
+Sources from libsvm-2.88 plus:
+
+- info() is silenced
+- __declspec(dllexport) magic in svm.h for windows
+- added model_w2 function that returns the norm of the normal vector
+  of the separating hyperplane
