@@ -612,13 +612,13 @@ from the function svm_get_labels.
 For a regression model, label[0] is the function value of x calculated
 using the model. For one-class model, label[0] is +1 or -1."
   (let* ((n-classes (n-classes model))
-         (n (/ (* n-classes (1- n-classes)) 2))
-         (v (foreign-alloc :double :count n)))
-    (%predict-values model input v)
-    (let ((decision-values (make-array n :element-type 'double-float)))
-      (dotimes (i n)
-        (setf (aref decision-values i) (mem-aref v :double i)))
-      decision-values)))
+         (n (/ (* n-classes (1- n-classes)) 2)))
+    (with-foreign-pointer (v (* (foreign-type-size :double) n))
+      (%predict-values model input v)
+      (let ((decision-values (make-array n :element-type 'double-float)))
+        (dotimes (i n)
+          (setf (aref decision-values i) (mem-aref v :double i)))
+        decision-values))))
 
 ;;; This is not in stock libsvm, the sources distributed with
 ;;; cl-libsvm have it.
