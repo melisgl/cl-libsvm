@@ -641,6 +641,9 @@ decision boundary:
       w2s)))
 
 ;;; FIXME: cross validation, probability stuff is missing
+
+
+;;;; Normalizer
 
 (defun map-it (function sequence-or-mapper)
   (if (typep sequence-or-mapper 'sequence)
@@ -746,6 +749,9 @@ range."
   (with-open-file (stream filename
                    :element-type 'base-char :external-format :ascii)
     (read-normalizer stream)))
+
+
+;;;; Test
 
 (defun test-problem ()
   (let* ((targets (vector 0 1 1 0))
