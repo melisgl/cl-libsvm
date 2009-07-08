@@ -628,10 +628,7 @@ using the model. For one-class model, label[0] is +1 or -1."
 (defun model-w2s (model)
   "Get the squared norm of the vector of each hyperplane for the
 binary SVMs. See PREDICT-VALUES. To calculate the distance from the
-decision boundary:
-
-  (/ (abs (aref decision-values i))
-     (sqrt (aref w2s i)))"
+decision boundary, use DISTANCES-FROM-HYPERPLANE."
   (let* ((n-classes (n-classes model))
          (n (/ (* n-classes (1- n-classes)) 2))
          (v (%svm_get_model_w2 model)))
@@ -639,6 +636,84 @@ decision boundary:
       (dotimes (i n)
         (setf (aref w2s i) (mem-aref v :double i)))
       w2s)))
+
+(defun distances-from-hyperplane (decision-values w2s)
+  "Calculate the distances from the decision boundary for each subsvm
+in a classification class. You may obtain DECISION-VALUES from
+PREDICT-VALUES and W2S from MODEL-W2S."
+  (map 'vector
+       (lambda (decision-value w2)
+         (/ (abs decision-value)
+            (sqrt w2)))
+       decision-values
+       w2s))
+
+(defun predict-distances (model input &key (w2s (model-w2s model)))
+  "Convenience function on top of PREDICT-DISTANCES and
+PREDICT-VALUES. W2S may be passed in to save computation."
+  (distances-from-hyperplane (predict-values model input) w2s))
+
+(defun upper-half-index (row col n)
+  "If the upper half of a square matrix of size N is stored in a
+vector in a quasi row major manner, then return the index into this
+vector corresponding to the element at ROW and COL. (< ROW COL N) must
+hold."
+  ;; The upper half of a square matrix is stored as:
+  ;;
+  ;; 0: . U U R R
+  ;; 1: . . U R R
+  ;; 2: . . . X V
+  ;; 3: . . . . V
+  ;; 4: . . . . .
+  (assert (< row col n))
+  (let* ((s (expt row 2)))
+    (1- (+
+         ;; marked as U:
+         (- s (/ (- s row) 2))
+         ;; marked as R
+         (* row (- n row 1))
+         (- col row)))))
+
+(defun symmetric-upper-half-index (row col n)
+  (when (< col row)
+    (rotatef row col))
+  (upper-half-index row col n))
+
+(let ((indices #2a((nil 0 1 2 3)
+                   (nil nil 4 5 6)
+                   (nil nil nil 7 8)
+                   (nil nil nil nil 9)
+                   (nil nil nil nil nil))))
+  (dotimes (row 5)
+    (dotimes (col 5)
+      (assert (eql (aref indices row col)
+                   (ignore-errors
+                     (upper-half-index row col 5)))))))
+
+(let ((indices #2a((nil 0 1 2 3)
+                   (0 nil 4 5 6)
+                   (1 4 nil 7 8)
+                   (2 5 7 nil 9)
+                   (3 6 8 9 nil))))
+  (dotimes (row 5)
+    (dotimes (col 5)
+      (assert (eql (aref indices row col)
+                   (ignore-errors
+                     (symmetric-upper-half-index row col 5)))))))
+
+(defun value-for-subsvm (seq label1 label2 &key model
+                         (model-labels (libsvm:get-labels model)))
+  "In classification tasks, there is one subsvm for each unordered
+pair of different labels. Return the value in SEQ pertaining to the
+subsvm that dicedes between LABEL1 and LABEL2. This is to look up
+values in the result of PREDICT-VALUES, MODEL-W2S or
+DISTANCES-FROM-HYPERPLANE."
+  (let ((l1 (position label1 model-labels :test #'=))
+        (l2 (position label2 model-labels :test #'=))
+        (n (length model-labels)))
+    (assert l1)
+    (assert l2)
+    (elt seq (symmetric-upper-half-index l1 l2 n))))
 
 ;;; FIXME: cross validation, probability stuff is missing
 
@@ -832,14 +907,9 @@ range."
                                      w2s))
                          (terpri)))
                  (flet ((distance (x y)
-                          (aref (map 'vector
-                                     (lambda (decision-value w2)
-                                       (/ (abs decision-value)
-                                          (sqrt w2)))
-                                     (predict-values model
-                                                     (vector (cons 1 x)
-                                                             (cons 2 y)))
-                                     w2s)
+                          (aref (predict-distances model
+                                                   (vector (cons 1 x)
+                                                           (cons 2 y)))
                                 0)))
                    (let ((a (distance 0.5 1))
                          (b (distance 0.5 0))

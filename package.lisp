@@ -28,6 +28,9 @@
            #:predict
            #:predict-values
            #:model-w2s
+           #:distances-from-hyperplane
+           #:predict-distances
+           #:value-for-subsvm
            ;; Normalizer
            #:normalizer
            #:make-normalizer
