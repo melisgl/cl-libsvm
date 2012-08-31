@@ -624,6 +624,24 @@ using the model. For one-class model, label[0] is +1 or -1."
           (setf (aref decision-values i) (mem-aref v :double i)))
         decision-values))))
 
+(defcfun ("svm_predict_probability" %predict-probability) :double
+  (model model)
+  (input temporary-sparse-vector)
+  (probabilities double-vector))
+
+(defun predict-probabilities (model input)
+  "Return the prediction (a double float) for the sparse vector INPUT
+according to MODEL. As the second value return a double float vector
+of probabilities for the labels in the order they appear in
+GET-LABELS."
+  (let* ((n-classes (n-classes model)))
+    (with-foreign-pointer (v (* (foreign-type-size :double) n-classes))
+      (let ((prediction (%predict-probability model input v))
+            (probabilities (make-array n-classes :element-type 'double-float)))
+        (dotimes (i n-classes)
+          (setf (aref probabilities i) (mem-aref v :double i)))
+        (values prediction probabilities)))))
+
 ;;; This is not in stock libsvm, the sources distributed with
 ;;; cl-libsvm have it.
 (defcfun ("svm_get_model_w2" %svm_get_model_w2) :pointer
@@ -934,6 +952,63 @@ range."
           (save-model model filename)
           (test-model (load-model filename)))))))
 
+(defun test-predict-probabilities ()
+  (let* ((inputs (coerce (loop repeat 1000
+                               collect (let ((x (random 1d0))
+                                             (y (random 1d0)))
+                                         (vector (cons 1 x) (cons 2 y))))
+                         'vector))
+         (targets (map 'vector
+                       (lambda (input)
+                         (cond ((and (> 0.4 (cdr (aref input 0)))
+                                     (> 0.4 (cdr (aref input 1))))
+                                0)
+                               ((and (> 0.4 (cdr (aref input 0)))
+                                     (< 0.6 (cdr (aref input 1))))
+                                1)
+                               ((and (< 0.6 (cdr (aref input 0)))
+                                     (< 0.6 (cdr (aref input 1))))
+                                2)
+                               ((and (< 0.6 (cdr (aref input 0)))
+                                     (> 0.4 (cdr (aref input 1))))
+                                3)
+                               (t
+                                4)))
+                       inputs))
+         (problem (make-problem targets inputs)))
+    (assert (= (length targets) (problem-size problem)))
+    (let ((parameter (make-parameter :svm-type :nu-svc
+                                     :kernel-type :linear
+                                     :nu 0.5d0
+                                     :probability t)))
+      (assert (check-parameter problem parameter))
+      (flet ((test-model (model)
+               (assert (= 5 (n-classes model)))
+               (let ((n-misses 0)
+                     (labels (get-labels model)))
+                 (format *trace-output* "labels: ~S~%" (get-labels model))
+                 (loop for i below (length inputs)
+                       do (multiple-value-bind (label probabilities)
+                              (predict-probabilities model (aref inputs i))
+                            (when (/= label (aref targets i))
+                              (incf n-misses))
+                            (let ((label-probability
+                                    (aref probabilities
+                                          (position label labels :test #'=))))
+                              (assert
+                               (every (lambda (probability)
+                                        (<= probability label-probability))
+                                      probabilities)))))
+                 (format *trace-output* "~S misses out of ~S~%"
+                         n-misses (length inputs))
+                 (assert (<= n-misses (* 0.4 (length inputs)))))))
+        (let ((model (train problem parameter))
+              (filename (merge-pathnames (make-pathname :name "test-model")
+                                         *libsvm-dir*)))
+          (test-model model)
+          (save-model model filename)
+          (test-model (load-model filename)))))))
+
 (defun test-normalizer ()
   (let* ((data (vector (vector (cons 1 4.0) (cons 3 -5.0))
                        (vector (cons 1 -2.0) (cons 3 3.0))
@@ -957,6 +1032,7 @@ range."
 (defun test ()
   (test-problem)
   (test-predict-values)
+  (test-predict-probabilities)
   (test-normalizer))
 
 #|

@@ -27,6 +27,7 @@
            #:get-labels
            #:predict
            #:predict-values
+           #:predict-probabilities
            #:model-w2s
            #:distances-from-hyperplane
            #:predict-distances
