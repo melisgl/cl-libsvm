@@ -509,11 +509,15 @@ used later to make predictions."))
 
 (define-wrapped-pointer model-type model)
 
-(defcfun ("svm_destroy_model" %destroy-model) :void
+(defcfun ("svm_destroy_model" %destroy-model-v2) :void
+  (model model))
+
+(defcfun ("svm_free_and_destroy_model" %destroy-model-v3) :void
   (model model))
 
 (defmethod destroy-wrapped-pointer (model (ctype model))
-  (%destroy-model model))
+  (or (%destroy-model-v2 model)
+      (%destroy-model-v3 model)))
 
 (define-foreign-type error-code-type ()
   ()
