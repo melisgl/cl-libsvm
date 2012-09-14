@@ -1,44 +1,24 @@
-(in-package :cl-libsvm)
+(in-package :liblinear)
 
-(defparameter *libsvm-dir*
+(defparameter *liblinear-dir*
   (make-pathname :name nil :type nil
                  :defaults (asdf:component-pathname
-                            (asdf:find-system :cl-libsvm))))
+                            (asdf:find-system :cl-liblinear))))
 
-(defparameter *libsvm-lib-dir*
+(defparameter *liblinear-lib-dir*
   (merge-pathnames (make-pathname :directory '(:relative "lib")
-                                  :name "libsvm" :type "so")
-                   *libsvm-dir*))
+                                  :name "liblinear" :type "so")
+                   *liblinear-dir*))
 
-#+(and :linux cffi-features:x86)
-(load-foreign-library
- (merge-pathnames (make-pathname :directory '(:relative "linux-x86"))
-                  *libsvm-lib-dir*))
+(define-foreign-library liblinear
+  (:darwin "liblinear.dylib")
+  (:unix (:or "/home/mega/lisp/liblinear-1.91/liblinear.so.1" "liblinear.so"))
+  (:windows (:or "liblinear.dll" "svmc.dll"))
+  (t (:default "liblinear")))
 
-#+(and cffi-features:windows cffi-features:x86)
-(load-foreign-library
- (merge-pathnames (make-pathname :name "libsvm" :type "dll"
-                                 :directory '(:relative "win-x86"))
-                  *libsvm-lib-dir*))
+(use-foreign-library liblinear)
 
-#+(and cffi-features:windows cffi-features:x86-64)
-(load-foreign-library
- (merge-pathnames (make-pathname :name "libsvm" :type "dll"
-                                 :directory '(:relative "win-x86-64"))
-                  *libsvm-lib-dir*))
-
-#-(or (and :linux cffi-features:x86)
-      (and cffi-features:windows cffi-features:x86)
-      (and cffi-features:windows cffi-features:x86-64))
-(progn
-  (define-foreign-library libsvm
-    (:darwin "libsvm.dylib")
-    (:unix (:or "libsvm.so.2" "libsvm.so"))
-    (:windows (:or "libsvm.dll" "svmc.dll"))
-    (t (:default "libsvm")))
-  (use-foreign-library libsvm))
-
-(define-condition libsvm-error () ())
+(define-condition liblinear-error () ())
 
 
 ;;;; Wrapped pointers
@@ -178,7 +158,7 @@ lisp OBJECT to POINTER-CTYPE and than returns the value of its slot."
 (defmethod translate-to-foreign ((v symbol) (name double-vector))
   (convert-vector v 'auto-double))
 
-(define-condition sparse-index-error (libsvm-error)
+(define-condition sparse-index-error (liblinear-error)
   ((index :initarg :index :reader index)
    (max-index :initarg :max-index :reader max-index))
   (:report (lambda (condition stream)
@@ -242,8 +222,26 @@ lisp OBJECT to POINTER-CTYPE and than returns the value of its slot."
 
 (defcstruct problem-struct
   (l :int)
+  (n :int)
   (y double-vector)
-  (x sparse-vector-vector))
+  (x sparse-vector-vector)
+  (bias auto-double))
+
+#|
+
+(cffi:foreign-type-size 'problem-struct)
+(cffi:foreign-slot-offset 'problem-struct 'bias)
+
+(defun foo (p)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (setf (foreign-slot-value p 'problem-struct 'bias) 1d0))
+
+(defun foo (p)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (setf (foreign-slot-value p 'problem-struct 'l) 1))
+(disassemble 'foo)
+
+|#
 
 (define-foreign-type problem-type ()
   ()
@@ -282,8 +280,21 @@ mapper function that maps to index and value."
       (let ((p (foreign-alloc 'problem-struct)))
         (setf (foreign-slot-value p 'problem-struct 'l) n-targets
               (foreign-slot-value p 'problem-struct 'y) targets
-              (foreign-slot-value p 'problem-struct 'x) inputs)
-        (wrap p (make-instance 'problem-type))))))
+              (foreign-slot-value p 'problem-struct 'x) inputs
+              (foreign-slot-value p 'problem-struct 'bias) 1d0)
+        (let ((problem (wrap p (make-instance 'problem-type))))
+          (setf (foreign-slot-value p 'problem-struct 'n)
+                (1+ (max-problem-feature problem)))
+          problem)))))
+
+(defun max-problem-feature (problem)
+  (let ((max -1))
+    (dotimes (i (problem-size problem))
+      (map-problem-input (lambda (index value)
+                           (declare (ignore value))
+                           (setf max (max max index)))
+                         problem i))
+    max))
 
 (defun problem-size (problem)
   "Return the number of targets in PROBLEM."
@@ -370,39 +381,19 @@ PROBLEM."
 
 ;;;; Parameter
 
-(defcenum svm-type :c-svc :nu-svc :one-class :epsilon-svr :nu-svr)
+(defcenum solver-type :l2r-lr :l2r-l2loss-svc-dual :l2r-l2loss-svc
+  :l2r-l1loss-svc-dual :mcsvm-cs :l1r-l2loss-svc :l1r-lr :l2r-lr-dual)
 
-(defcenum kernel-type :linear :poly :rbf :sigmoid :precomputed)
-
+;; (foreign-type-alignment 'auto-double)
 (defcstruct parameter-struct
-  (svm-type svm-type)
-  (kernel-type kernel-type)
-  ;; for poly
-  (degree :int)
-  ;; for poly/rbf/sigmoid
-  (gamma auto-double)
-  ;; for poly/sigmoid
-  (coef0 auto-double)
-  ;; these are for training only
-  (cache-size-MiB auto-double)
+  (solver-type solver-type)
   ;; stopping criteria
   (eps auto-double)
-  ;; for C-SVC, EPSILON-SVR and NU-SVR
   (c auto-double)
-  ;; for C-SVC, unsupported by this wrapper
   (nr-weight :int)
-  ;; for C-SVC
   (weight-label :pointer)
-  ;; for C-SVC
   (weight :pointer)
-  ;; for NU-SVC, ONE-CLASS, and NU-SVR
-  (nu auto-double)
-  ;; for EPSILON-SVR
-  (p auto-double)
-  ;; use the shrinking heuristics
-  (shrinking :boolean)
-  ;; do probability estimates
-  (probability :boolean))
+  (p auto-double))
 
 (define-foreign-type parameter-type ()
   ()
@@ -421,13 +412,9 @@ particular kernel."))
      ,@(when documentation (list documentation))
      (foreign-slot-value* ,class-name ',pointer-ctype ',ctype ',slot-name)))
 
-(define-slot-reader svm-type
+(define-slot-reader solver-type
     (:pointer-ctype parameter :ctype parameter-struct)
-  "Return the value of the SVM-TYPE slot of PARAMETER.")
-
-(define-slot-reader kernel-type
-    (:pointer-ctype parameter :ctype parameter-struct)
-  "Return the value of the KERNEL-TYPE slot of PARAMETER.")
+  "Return the value of the SOLVER-TYPE slot of PARAMETER.")
 
 ;;; FIXME: missing readers for parameters
 
@@ -437,19 +424,12 @@ particular kernel."))
 
 (defmethod print-object ((parameter parameter) stream)
   (print-unreadable-object (parameter stream :type t :identity t)
-    (format stream "~A/~A" (svm-type parameter) (kernel-type parameter)))
+    (format stream "~A" (solver-type parameter)))
   parameter)
 
-(defun make-parameter (&key (svm-type :c-svc) (kernel-type :rbf)
-                       (degree 3) (gamma 0) (coef0 0) (nu 0.5)
-                       (cache-size-MiB 100) (c 1) (eps 0.001) (p 0.1)
-                       (shrinking t) probability)
-  "Make an object that describes how to TRAIN. Note that the command
-line svm-train defaults to GAMMA=1/maxindex but in this function it
-defaults to 0. SVM-TYPE is one of :C-SVC, :NU-SVC, :ONE-CLASS,
-:EPSILON-SVR, :NU-SVR. KERNEL-TYPE is one of :LINEAR, :POLY, :RBF,
-:SIGMOID, :PRECOMPUTED. See the LIBSVM documentation for the meaning
-of the arguments."
+(defun make-parameter (&key (solver-type :l2r-lr) (c 1) (eps 0.001) (p 0.1))
+  "Make an object that describes how to TRAIN. See the LIBLINEAR
+documentation for the meaning of the arguments."
   (let ((parameter (foreign-alloc 'parameter-struct)))
     (macrolet ((set-slots (&rest names)
                  (list* 'progn
@@ -463,16 +443,14 @@ of the arguments."
       (let ((nr-weight 0)
             (weight-label (null-pointer))
             (weight (null-pointer)))
-        (set-slots svm-type kernel-type degree gamma coef0 nu
-                   cache-size-MiB c eps p shrinking probability
-                   nr-weight weight-label weight))
+        (set-slots solver-type c eps nr-weight weight-label weight p))
       (wrap parameter (make-instance 'parameter-type)))))
 
-(defcfun ("svm_check_parameter" %check-parameter) :string
+(defcfun ("check_parameter" %check-parameter) :string
   (problem problem)
   (parameter parameter))
 
-(define-condition parameter-error (libsvm-error)
+(define-condition parameter-error (liblinear-error)
   ((parameter :initarg :parameter :reader parameter)
    (problem :initarg :problem :reader problem)
    (explanation :initarg :explanation :reader explanation))
@@ -509,15 +487,11 @@ used later to make predictions."))
 
 (define-wrapped-pointer model-type model)
 
-(defcfun ("svm_destroy_model" %destroy-model-v2) :void
-  (model model))
-
-(defcfun ("svm_free_and_destroy_model" %destroy-model-v3) :void
+(defcfun ("free_and_destroy_model" %free-and-destroy-model) :void
   (model model))
 
 (defmethod destroy-wrapped-pointer (model (ctype model))
-  (or (%destroy-model-v2 model)
-      (%destroy-model-v3 model)))
+  (%free-and-destroy-model model))
 
 (define-foreign-type error-code-type ()
   ()
@@ -529,7 +503,7 @@ used later to make predictions."))
     (error "Error code: ~S" error-code))
   (values))
 
-(defcfun ("svm_save_model" %save-model) error-code
+(defcfun ("save_model" %save-model) error-code
   (filename :string)
   (model model))
 
@@ -539,7 +513,7 @@ used later to make predictions."))
                 (merge-pathnames filename *default-pathname-defaults*))
                model))
 
-(defcfun ("svm_load_model" %load-model) model
+(defcfun ("load_model" %load-model) model
   (filename :string))
 
 (defun load-model (filename)
@@ -550,7 +524,7 @@ used later to make predictions."))
       (error "Cannot load ~S" filename))
     model))
 
-(defcfun ("svm_train" %train) model
+(defcfun ("train" %train) model
   (problem problem)
   (parameter parameter))
 
@@ -565,24 +539,24 @@ used later to make predictions."))
 Signal a PARAMETER-ERROR if PARAMETER is incorrect."
   (check-parameter problem parameter :errorp t)
   (let ((model (%train problem parameter)))
-    ;; The models created by svm_train keep references into the
+    ;; The models created by train keep references into the
     ;; problem so it must be kept around.
     (push problem (references model))
     model))
 
-(defcfun ("svm_get_nr_class" n-classes) :int
+(defcfun ("get_nr_class" n-classes) :int
   (model model))
 
 (setf (documentation #'n-classes 'function)
       "For a classification model, this function gives the number of
 classes. For a regression or an one-class model, 2 is returned.")
 
-(defcfun ("svm_get_labels" %get-labels) :void
+(defcfun ("get_labels" %get-labels) :void
   (model model)
   (labels :pointer))
 
 (defun get-labels (model)
-  "Wrapper around svm_get_labels."
+  "Wrapper around get_labels."
   (let* ((n-classes (n-classes model))
          (v (foreign-alloc :int :count n-classes)))
     (%get-labels model v)
@@ -591,7 +565,7 @@ classes. For a regression or an one-class model, 2 is returned.")
         (setf (aref labels i) (mem-aref v :int i)))
       labels)))
 
-(defcfun ("svm_predict" predict) :double
+(defcfun ("predict" predict) :double
   (model model)
   (input temporary-sparse-vector))
 
@@ -599,19 +573,19 @@ classes. For a regression or an one-class model, 2 is returned.")
       "Return the prediction (a double float) for the sparse vector
 INPUT according to MODEL.")
 
-(defcfun ("svm_predict_values" %predict-values) :void
+(defcfun ("predict_values" %predict-values) :void
   (model model)
   (input temporary-sparse-vector)
   (decision-values double-vector))
 
 (defun predict-values (model input)
-  "Wrapper around svm_predict_values. For a classification model with
+  "Wrapper around predict_values. For a classification model with
 nr_class classes, this function gives nr_class*(nr_class-1)/2 decision
 values in the array dec_values, where nr_class can be obtained from
-the function svm_get_nr_class. The order is label[0] vs. label[1],
+the function get_nr_class. The order is label[0] vs. label[1],
 ..., label[0] vs. label[nr_class-1], label[1] vs. label[2], ...,
 label[nr_class-2] vs. label[nr_class-1], where label can be obtained
-from the function svm_get_labels.
+from the function get_labels.
 
 For a regression model, label[0] is the function value of x calculated
 using the model. For one-class model, label[0] is +1 or -1."
@@ -624,7 +598,7 @@ using the model. For one-class model, label[0] is +1 or -1."
           (setf (aref decision-values i) (mem-aref v :double i)))
         decision-values))))
 
-(defcfun ("svm_predict_probability" %predict-probability) :double
+(defcfun ("predict_probability" %predict-probability) :double
   (model model)
   (input temporary-sparse-vector)
   (probabilities double-vector))
@@ -641,39 +615,6 @@ GET-LABELS."
         (dotimes (i n-classes)
           (setf (aref probabilities i) (mem-aref v :double i)))
         (values prediction probabilities)))))
-
-;;; This is not in stock libsvm, the sources distributed with
-;;; cl-libsvm have it.
-(defcfun ("svm_get_model_w2" %svm_get_model_w2) :pointer
-  (model model))
-
-(defun model-w2s (model)
-  "Get the squared norm of the vector of each hyperplane for the
-binary SVMs. See PREDICT-VALUES. To calculate the distance from the
-decision boundary, use DISTANCES-FROM-HYPERPLANE."
-  (let* ((n-classes (n-classes model))
-         (n (/ (* n-classes (1- n-classes)) 2))
-         (v (%svm_get_model_w2 model)))
-    (let ((w2s (make-array n :element-type 'double-float)))
-      (dotimes (i n)
-        (setf (aref w2s i) (mem-aref v :double i)))
-      w2s)))
-
-(defun distances-from-hyperplane (decision-values w2s)
-  "Calculate the distances from the decision boundary for each subsvm
-in a classification class. You may obtain DECISION-VALUES from
-PREDICT-VALUES and W2S from MODEL-W2S."
-  (map 'vector
-       (lambda (decision-value w2)
-         (/ (abs decision-value)
-            (sqrt w2)))
-       decision-values
-       w2s))
-
-(defun predict-distances (model input &key (w2s (model-w2s model)))
-  "Convenience function on top of PREDICT-DISTANCES and
-PREDICT-VALUES. W2S may be passed in to save computation."
-  (distances-from-hyperplane (predict-values model input) w2s))
 
 (defun upper-half-index (row col n)
   "If the upper half of a square matrix of size N is stored in a
@@ -864,7 +805,7 @@ range."
          (problem (make-problem targets inputs)))
     (assert (= (length targets) (problem-size problem)))
     (loop for i below (length targets) do
-          (assert (= (aref targets i) (problem-target problem i))))
+      (assert (= (aref targets i) (problem-target problem i))))
     (flet ((input->vector (problem i)
              (let ((v (make-array 0 :adjustable t :fill-pointer 0)))
                (map-problem-input (lambda (index value)
@@ -872,20 +813,19 @@ range."
                                   problem i)
                v)))
       (loop for i below (length inputs) do
-            (unless (= i 1)
-              (assert (every (lambda (x y)
-                               (and (= (car x) (car y))
-                                    (= (cdr x) (cdr y))))
-                             (coerce (aref inputs i) 'list)
-                             (coerce (input->vector problem i) 'list))))))
-    (assert (not (check-parameter problem (make-parameter :degree -1))))
-    (let ((parameter (make-parameter :gamma 8)))
+        (unless (= i 1)
+          (assert (every (lambda (x y)
+                           (and (= (car x) (car y))
+                                (= (cdr x) (cdr y))))
+                         (coerce (aref inputs i) 'list)
+                         (coerce (input->vector problem i) 'list))))))
+    (let ((parameter (make-parameter)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
                (assert (= 2 (or (n-classes model))))))
         (let ((model (train problem parameter))
               (filename (merge-pathnames (make-pathname :name "test-model")
-                                         *libsvm-dir*)))
+                                         *liblinear-dir*)))
           (test-model model)
           (save-model model filename)
           (test-model (load-model filename)))))))
@@ -907,47 +847,16 @@ range."
                        inputs))
          (problem (make-problem targets inputs)))
     (assert (= (length targets) (problem-size problem)))
-    (let ((parameter (make-parameter :kernel-type :linear)))
+    (let ((parameter (make-parameter)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
                (assert (= 2 (or (n-classes model))))
-               ;; Don't fail the tests if svm_get_model_w2 is not
-               ;; compiled in.
-               (let ((w2s (ignore-errors (model-w2s model))))
-                 (format t "W2S: ~S~%" w2s)
-                 (loop for i below (length inputs) do
-                   (format t "~S: ~S~%" i (aref inputs i))
-                   (when (< 0.1 (abs (- 0.5 (cdr (aref (aref inputs i) 0)))))
-                     (assert (= (aref targets i)
-                                (predict model (aref inputs i)))))
-                   (let ((decision-values
-                           (predict-values model (aref inputs i))))
-                     (format t "DV: ~S~%" decision-values)
-                     (print (map 'vector
-                                 (lambda (decision-value w2)
-                                   (/ (abs decision-value)
-                                      (sqrt w2)))
-                                 decision-values
-                                 w2s))
-                     (terpri)))
-                 (when w2s
-                   (flet ((distance (x y)
-                            (aref (predict-distances model
-                                                     (vector (cons 1 x)
-                                                             (cons 2 y)))
-                                  0)))
-                     (let ((a (distance 0.5 1))
-                           (b (distance 0.5 0))
-                           (c (distance 0.5 -1))
-                           (d (distance 0.3 1))
-                           (e (distance 0.7 0))
-                           (f (distance 0.1 1))
-                           (g (distance 0.9 0)))
-                       (assert (< (max a b c) (min d e)))
-                       (assert (< (max d e) (min f g)))))))))
+               (loop for i below (length inputs) do
+                 (format t "~S: ~S~%" i (aref inputs i))
+                 (predict-values model (aref inputs i)))))
         (let ((model (train problem parameter))
               (filename (merge-pathnames (make-pathname :name "test-model")
-                                         *libsvm-dir*)))
+                                         *liblinear-dir*)))
           (test-model model)
           (save-model model filename)
           (test-model (load-model filename)))))))
@@ -977,10 +886,7 @@ range."
                        inputs))
          (problem (make-problem targets inputs)))
     (assert (= (length targets) (problem-size problem)))
-    (let ((parameter (make-parameter :svm-type :nu-svc
-                                     :kernel-type :linear
-                                     :nu 0.5d0
-                                     :probability t)))
+    (let ((parameter (make-parameter)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
                (assert (= 5 (n-classes model)))
@@ -1000,11 +906,10 @@ range."
                                         (<= probability label-probability))
                                       probabilities)))))
                  (format *trace-output* "~S misses out of ~S~%"
-                         n-misses (length inputs))
-                 (assert (<= n-misses (* 0.4 (length inputs)))))))
+                         n-misses (length inputs)))))
         (let ((model (train problem parameter))
               (filename (merge-pathnames (make-pathname :name "test-model")
-                                         *libsvm-dir*)))
+                                         *liblinear-dir*)))
           (test-model model)
           (save-model model filename)
           (test-model (load-model filename)))))))

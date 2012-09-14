@@ -12,7 +12,7 @@
   :author "Gabor Melis"
   :version "0.0.7"
   :licence "MIT"
-  :components ((:file "package")
+  :components ((:file "libsvm-package")
                (:file "libsvm"))
   :serial t
   :depends-on (cffi trivial-garbage))
