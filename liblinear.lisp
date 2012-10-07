@@ -12,7 +12,7 @@
 
 (define-foreign-library liblinear
   (:darwin "liblinear.dylib")
-  (:unix (:or "/home/mega/lisp/liblinear-1.91/liblinear.so.1" "liblinear.so"))
+  (:unix (:or "liblinear.so.1" "liblinear.so"))
   (:windows (:or "liblinear.dll" "svmc.dll"))
   (t (:default "liblinear")))
 

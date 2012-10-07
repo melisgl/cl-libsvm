@@ -33,7 +33,7 @@
 (progn
   (define-foreign-library libsvm
     (:darwin "libsvm.dylib")
-    (:unix (:or "libsvm.so.2" "libsvm.so"))
+    (:unix (:or "libsvm.so.3" "libsvm.so.2" "libsvm.so"))
     (:windows (:or "libsvm.dll" "svmc.dll"))
     (t (:default "libsvm")))
   (use-foreign-library libsvm))
