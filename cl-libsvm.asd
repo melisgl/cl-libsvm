@@ -20,6 +20,3 @@
 (defmethod perform ((o test-op) (c (eql (find-system 'cl-libsvm))))
   (funcall (intern (symbol-name '#:test)
                    (find-package '#:cl-libsvm))))
-
-(defmethod operation-done-p ((o test-op) (c (eql (find-system 'cl-libsvm))))
-  (values nil))

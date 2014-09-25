@@ -20,6 +20,3 @@
 (defmethod perform ((o test-op) (c (eql (find-system 'cl-liblinear))))
   (funcall (intern (symbol-name '#:test)
                    (find-package '#:cl-liblinear))))
-
-(defmethod operation-done-p ((o test-op) (c (eql (find-system 'cl-liblinear))))
-  (values nil))
