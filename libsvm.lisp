@@ -878,7 +878,8 @@ range."
                                     (= (cdr x) (cdr y))))
                              (coerce (aref inputs i) 'list)
                              (coerce (input->vector problem i) 'list))))))
-    (assert (not (check-parameter problem (make-parameter :degree -1))))
+    (assert (not (check-parameter problem (make-parameter :degree -1
+                                                          :gamma -1))))
     (let ((parameter (make-parameter :gamma 8)))
       (assert (check-parameter problem parameter))
       (flet ((test-model (model)
