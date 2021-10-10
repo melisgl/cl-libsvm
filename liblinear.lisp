@@ -393,7 +393,8 @@ PROBLEM."
   (nr-weight :int)
   (weight-label :pointer)
   (weight :pointer)
-  (p auto-double))
+  (p auto-double)
+  (init-sol :pointer))
 
 (define-foreign-type parameter-type ()
   ()
@@ -444,6 +445,8 @@ documentation for the meaning of the arguments."
             (weight-label (null-pointer))
             (weight (null-pointer)))
         (set-slots solver-type c eps nr-weight weight-label weight p))
+      (setf (foreign-slot-value parameter 'parameter-struct 'init-sol)
+            (null-pointer))
       (wrap parameter (make-instance 'parameter-type)))))
 
 (defcfun ("check_parameter" %check-parameter) :string
